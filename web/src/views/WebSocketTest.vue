@@ -46,7 +46,7 @@
 
           <el-row :gutter="20" style="margin-top: 15px">
             <el-col :span="24">
-              <el-space>
+              <div class="ws-btn-row">
                 <el-button
                   v-if="!isConnected"
                   type="primary"
@@ -87,7 +87,7 @@
                 >
                   清空快照
                 </el-button>
-              </el-space>
+              </div>
             </el-col>
           </el-row>
         </el-card>
@@ -231,7 +231,7 @@
             <template #header>
               <div class="panel-header">
                 <span>K线图</span>
-                <el-space>
+                <div class="ws-btn-row">
                   <el-select
                     v-model="klinePeriod"
                     size="small"
@@ -245,7 +245,7 @@
                     <el-option label="60分钟" :value="8" />
                     <el-option label="日线" :value="0" />
                   </el-select>
-                </el-space>
+                </div>
               </div>
             </template>
 
@@ -446,7 +446,7 @@
     </el-container>
 
     <!-- 订阅对话框 -->
-    <el-dialog v-model="showSubscribeDialog" title="订阅行情" width="500px">
+    <el-dialog :visible.sync="showSubscribeDialog" title="订阅行情" width="500px">
       <el-form label-width="100px">
         <el-form-item label="合约代码">
           <el-select
@@ -473,7 +473,7 @@
     </el-dialog>
 
     <!-- 快照对话框 -->
-    <el-dialog v-model="showSnapshotDialog" title="业务快照" width="800px">
+    <el-dialog :visible.sync="showSnapshotDialog" title="业务快照" width="800px">
       <pre class="snapshot-json">{{ JSON.stringify(snapshot, null, 2) }}</pre>
     </el-dialog>
   </div>
@@ -991,6 +991,16 @@ export default {
 </script>
 
 <style scoped lang="scss">
+/* ✨ 替代 el-space —— 它是 Element **Plus** 的组件,Element UI 2.15 没有,
+   原先渲染成未知元素 display:inline,flex 与 gap 全部丢失,按钮挤成一团。
+   @yutiansut @quantaxis */
+.ws-btn-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
 .websocket-test {
   width: 100%;
   height: 100vh;

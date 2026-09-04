@@ -248,6 +248,7 @@ impl RecoveryManager {
         account_states: HashMap<String, AccountState>,
     ) -> Result<usize, ExchangeError> {
         let mut restored_count = 0;
+        let mut skipped_existing = 0usize;   // 已由快照恢复、WAL 状态按设计跳过的账户数
 
         for (account_id, state) in account_states {
             // 创建开户请求（使用原始的 account_id）
@@ -298,10 +299,50 @@ impl RecoveryManager {
                     restored_count += 1;
                 }
                 Err(e) => {
-                    log::error!("Failed to restore account {}: {}", account_id, e);
-                    // 继续恢复其他账户
+                    // ✨ 区分「账户已存在」与真正的失败 @yutiansut @quantaxis
+                    //
+                    // 启动顺序是:`recover_from_snapshots()`(main.rs:1091)先跑,
+                    // 把账户连同**持仓 + 冻结**一起从快照恢复出来;
+                    // 随后 `recover_from_wal()`(:1108)走到这里,`open_account()`
+                    // 必然返回「已存在」。这是**预期路径**,不是失败。
+                    //
+                    // 原先一律 `log::error!("Failed to restore account ...")`,
+                    // 于是每次启动刷 14 条 ERROR。危害有三:
+                    //   ① 读起来像故障,实际是有意的空操作;
+                    //   ② 淹没真正的失败(告警疲劳 —— 2026-09-04 排查时
+                    //      我自己忽略了它数小时);
+                    //   ③ 掩盖了真实语义:「有快照时 WAL 账户恢复是 no-op」。
+                    //
+                    // ⚠️ 保留 no-op 语义是**有意的**,不要改成「覆盖」:
+                    //   WAL 的 `AccountUpdate` 只有 balance/available/frozen/margin,
+                    //   **没有持仓**;而快照是自洽的(余额+持仓+冻结同一时点)。
+                    //   用较新的 WAL 余额覆盖较旧的快照余额,会把新余额嫁接到旧持仓上。
+                    //   快照每 60 秒写一次(main.rs:1077),丢失窗口上限 60 秒,
+                    //   两害相权取自洽。
+                    //   若要真正修好,正确做法是让快照携带 WAL 序号,
+                    //   恢复时从该序号之后重放 —— 属设计变更,需单独评估。
+                    if e.to_string().contains("Account already exists") {
+                        log::debug!(
+                            "Account {} already restored from snapshot, skipping WAL state \
+                             (WAL-derived balance={} discarded by design)",
+                            account_id,
+                            state.balance
+                        );
+                        skipped_existing += 1;
+                    } else {
+                        log::error!("Failed to restore account {}: {}", account_id, e);
+                    }
                 }
             }
+        }
+
+        if skipped_existing > 0 {
+            log::info!(
+                "WAL account restore: {} 个账户已由快照恢复,其 WAL 状态按设计跳过(见 Err 分支注释);\
+                 {} 个从 WAL 新建",
+                skipped_existing,
+                restored_count
+            );
         }
 
         Ok(restored_count)

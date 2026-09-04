@@ -257,7 +257,8 @@ export default {
 }
 </script>
 
-<style scoped>
+<style scoped lang="scss">
+@import '@/styles/variables.scss';
 .margin-container {
   padding: 20px;
 }
@@ -271,7 +272,7 @@ export default {
 
 .page-header h2 {
   margin: 0;
-  color: #303133;
+  color: $dark-text-primary;
 }
 
 .summary-card {

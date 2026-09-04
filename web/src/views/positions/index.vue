@@ -121,7 +121,7 @@
     </el-card>
 
     <!-- 平仓对话框 -->
-    <el-dialog label="平仓" :visible.sync="closeDialogVisible" width="400px">
+    <el-dialog title="平仓" :visible.sync="closeDialogVisible" width="400px">
       <el-form :model="closeForm" ref="closeForm" label-width="100px">
         <el-form-item label="合约">
           <el-input v-model="closeForm.instrument_id" disabled />
@@ -242,11 +242,22 @@ export default {
         const positions = []
 
         rawPositions.forEach(pos => {
-          const lastPrice = priceMap[pos.instrument_id] || pos.cost_long || pos.cost_short || 0
+          // ✨ 后端现在直接给 last_price,优先用它;其次才用 tick 接口拉的 priceMap
+          const lastPrice = pos.last_price || priceMap[pos.instrument_id] || pos.cost_long || pos.cost_short || 0
 
           // 如果有多头持仓
           if (pos.volume_long > 0) {
-            const positionValue = pos.volume_long * lastPrice * 300
+            // ✨ 优先用后端给的真实值,拿不到才回退到旧估算 @yutiansut @quantaxis
+            //
+            // 后端 PositionInfo 现在透出 margin_long/margin_short/last_price/
+            // position_cost_long/position_cost_short(qars QA_Position 本来就有)。
+            // 旧写法 `volume * lastPrice * 300` 与 `volume * cost * 300 * 0.15`
+            // 里的 ×300 只对 IF/IC/IH 成立,15% 更是凭空假设 ——
+            // 真实保证金率来自 MarketPreset,每个品种不同。
+            // 保留回退分支是为了后端未重编时不炸(字段为 undefined)。
+            const positionValue = (pos.position_cost_long != null && pos.position_cost_long > 0)
+              ? pos.position_cost_long + (pos.profit_long || 0)
+              : pos.volume_long * lastPrice * 300
             // @yutiansut @quantaxis: 可平量 = 持仓量 - 冻结量
             const frozenLong = pos.volume_long_frozen || 0
             positions.push({
@@ -261,13 +272,18 @@ export default {
               position_value: positionValue,
               profit: pos.profit_long,
               profit_ratio: positionValue > 0 ? pos.profit_long / positionValue : 0,
-              margin: pos.volume_long * pos.cost_long * 300 * 0.15 // 假设保证金率15%
+              margin: (pos.margin_long != null)
+                ? pos.margin_long
+                : pos.volume_long * pos.cost_long * 300 * 0.15 // 回退:旧的 15% 估算
             })
           }
 
           // 如果有空头持仓
           if (pos.volume_short > 0) {
-            const positionValue = pos.volume_short * lastPrice * 300
+            // ✨ 同多头分支:优先用后端真实值
+            const positionValue = (pos.position_cost_short != null && pos.position_cost_short > 0)
+              ? pos.position_cost_short + (pos.profit_short || 0)
+              : pos.volume_short * lastPrice * 300
             // @yutiansut @quantaxis: 可平量 = 持仓量 - 冻结量
             const frozenShort = pos.volume_short_frozen || 0
             positions.push({
@@ -282,7 +298,9 @@ export default {
               position_value: positionValue,
               profit: pos.profit_short,
               profit_ratio: positionValue > 0 ? pos.profit_short / positionValue : 0,
-              margin: pos.volume_short * pos.cost_short * 300 * 0.15 // 假设保证金率15%
+              margin: (pos.margin_short != null)
+                ? pos.margin_short
+                : pos.volume_short * pos.cost_short * 300 * 0.15 // 回退:旧的 15% 估算
             })
           }
         })

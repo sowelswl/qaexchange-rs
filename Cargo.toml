@@ -169,7 +169,24 @@ opt-level = 3
 lto = "fat"
 codegen-units = 1
 panic = "abort"
-strip = true
+# ✨ 保留符号表 —— 生产崩溃栈必须可还原 @yutiansut @quantaxis
+#
+# 原为 `strip = true`。2026-09-04 8094 的 96 个 actix worker 全部死锁,
+# 用 SIGABRT + apport 成功拿到 11.4GB core,但 234 个线程栈里应用帧
+# 全是 `?? ()` —— core 白抓,只能退回静态分析,连续排掉 6 个错误假设。
+#
+# `strip = false` 只保留 ELF 符号表(函数名),不含 DWARF:
+# 链接期设置,**运行时零开销**,仅二进制变大。
+# 对一个撮合系统而言,「崩溃/挂死后能还原栈」远比几 MB 磁盘重要。
+strip = false
+# ✨ 行号表 —— 只有函数名不够 @yutiansut @quantaxis
+#
+# 2026-09-04 抓到死锁栈后卡住:`route_to_matching_engine` 里的 lock_exclusive
+# 到底是订单簿写锁,还是被 fat LTO 内联进来的 `order_info.write()`?
+# 光有函数名分不出来(process_matching_results 已被内联,整段消失)。
+# "line-tables-only" 只生成行号表,不含变量/类型 DWARF,
+# 链接开销远小于 debug=1(完整调试信息),但足以定位到具体源码行。
+debug = "line-tables-only"
 
 # 优化性能配置 (与 qars 保持一致)
 [profile.opt-dev]

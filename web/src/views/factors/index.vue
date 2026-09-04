@@ -293,7 +293,7 @@ export default {
   methods: {
     ensureConnection() {
       if (!this.isConnected) {
-        this.$store.dispatch('websocket/connect')
+        this.$store.dispatch('websocket/connectWebSocket')
       }
     },
 

@@ -121,6 +121,22 @@ pub struct PositionInfo {
     pub cost_short: f64,
     pub profit_long: f64,
     pub profit_short: f64,
+    // ✨ 补齐真实保证金与市价 —— 别让前端自己编公式 @yutiansut @quantaxis
+    //
+    // 原先本结构只有上面 10 个字段,没有 margin、没有 last_price、没有合约乘数,
+    // 于是 web/src/views/positions/index.vue:249/264/270/285 只能硬编码
+    //     positionValue = volume * lastPrice * 300
+    //     margin        = volume * cost * 300 * 0.15   // 「假设保证金率15%」
+    // ×300 只对 IF/IC/IH 成立(IH 也是 300,但其他品种不是),
+    // 15% 更是凭空假设 —— 真实保证金率来自 MarketPreset,每个品种不同。
+    // qars 的 QA_Position 本来就带 margin_long/margin_short/last_price,
+    // 直接透出即可。同项目 user/margin.vue 已经在用真实值,证明数据拿得到。
+    pub margin_long: f64,
+    pub margin_short: f64,
+    pub last_price: f64,
+    /// 持仓成本(已含合约乘数),前端算市值/收益率时用它,不要再自乘乘数
+    pub position_cost_long: f64,
+    pub position_cost_short: f64,
 }
 
 /// 成交查询响应

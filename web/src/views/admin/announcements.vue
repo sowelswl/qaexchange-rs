@@ -14,11 +14,11 @@
       <el-form :inline="true" :model="searchForm">
         <el-form-item label="公告类型">
           <el-select v-model="searchForm.announcement_type" placeholder="全部类型" clearable style="width: 150px">
-            <el-option label="系统公告" value="System"></el-option>
-            <el-option label="维护通知" value="Maintenance"></el-option>
-            <el-option label="交易提醒" value="Trading"></el-option>
-            <el-option label="风险提示" value="Risk"></el-option>
-            <el-option label="活动推广" value="Promotion"></el-option>
+            <el-option label="系统公告" value="SYSTEM"></el-option>
+            <el-option label="维护通知" value="MAINTENANCE"></el-option>
+            <el-option label="交易提醒" value="TRADING"></el-option>
+            <el-option label="风险提示" value="RISK"></el-option>
+            <el-option label="活动推广" value="PROMOTION"></el-option>
           </el-select>
         </el-form-item>
         <el-form-item label="状态">
@@ -350,12 +350,16 @@ export default {
     },
 
     getTypeTag(type) {
+      // ✨ 键必须是 SCREAMING_SNAKE —— 后端 models.rs:619 的两个枚举都带
+      //    #[serde(rename_all = "SCREAMING_SNAKE_CASE")]。上一轮改了同文件的
+      //    typeMap/priorityMap(决定文字)却漏了这两个 tagMap(决定颜色),
+      //    结果文字正常但颜色全部 fall through 到默认灰。 @yutiansut @quantaxis
       const tagMap = {
-        System: '',
-        Maintenance: 'warning',
-        Trading: 'success',
-        Risk: 'danger',
-        Promotion: 'info'
+        SYSTEM: '',
+        MAINTENANCE: 'warning',
+        TRADING: 'success',
+        RISK: 'danger',
+        PROMOTION: 'info'
       }
       return tagMap[type] || ''
     },
@@ -366,10 +370,10 @@ export default {
 
     getPriorityTag(priority) {
       const tagMap = {
-        Low: 'info',
-        Normal: '',
-        High: 'warning',
-        Urgent: 'danger'
+        LOW: 'info',
+        NORMAL: '',
+        HIGH: 'warning',
+        URGENT: 'danger'
       }
       return tagMap[priority] || ''
     },
@@ -382,7 +386,8 @@ export default {
 }
 </script>
 
-<style scoped>
+<style scoped lang="scss">
+@import '@/styles/variables.scss';
 .announcements-container {
   padding: 20px;
 }
@@ -396,7 +401,7 @@ export default {
 
 .page-header h2 {
   margin: 0;
-  color: #303133;
+  color: $dark-text-primary;
 }
 
 .header-actions {

@@ -159,11 +159,14 @@
         <tbody>
           <tr v-for="(result, index) in submitResult.results" :key="index">
             <td>{{ index + 1 }}</td>
-            <td>{{ result.instrument_id || '-' }}</td>
+            <!-- ✨ 后端 SingleOrderResult(models.rs) 只有 {index, success, order_id, error},
+                 没有 instrument_id —— 用 index 回查本次提交的订单列表。 @yutiansut @quantaxis -->
+            <td>{{ instrumentOfResult(result) }}</td>
             <td :class="result.success ? 'status-success' : 'status-failed'">
               {{ result.success ? '成功' : '失败' }}
             </td>
-            <td>{{ result.success ? result.order_id : result.error_message }}</td>
+            <!-- ✨ 字段名是 error 不是 error_message,原先失败原因恒为空白 -->
+            <td>{{ result.success ? result.order_id : result.error }}</td>
           </tr>
         </tbody>
       </table>
@@ -233,6 +236,13 @@ export default {
   },
 
   methods: {
+    // ✨ 后端 SingleOrderResult 只回 index,不回 instrument_id;
+    //    用 index 到本次提交的 orders 里回查。 @yutiansut @quantaxis
+    instrumentOfResult(result) {
+      const i = result && typeof result.index === 'number' ? result.index : -1
+      const o = i >= 0 && i < this.orders.length ? this.orders[i] : null
+      return (o && o.instrument_id) || '-'
+    },
     createEmptyOrder() {
       return {
         instrument_id: '',

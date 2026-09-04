@@ -47,7 +47,7 @@
           ></el-date-picker>
         </el-form-item>
         <el-form-item>
-          <el-button type="primary" icon="el-icon-search" @click="loadLogs">查询</el-button>
+          <el-button type="primary" icon="el-icon-search" @click="handleSearch">查询</el-button>
           <el-button icon="el-icon-refresh-left" @click="resetSearch">重置</el-button>
         </el-form-item>
       </el-form>
@@ -183,6 +183,12 @@ export default {
   },
 
   methods: {
+      // ✨ 查询必须重置页码 —— 否则在第 3 页上改筛选条件,
+      //    会带着 page=3 去请求新的结果集,拿到空表。 @yutiansut @quantaxis
+    handleSearch() {
+      this.pagination.page = 1
+      this.loadLogs()
+    },
     async loadLogs() {
       this.loading = true
       try {
@@ -271,7 +277,8 @@ export default {
 }
 </script>
 
-<style scoped>
+<style scoped lang="scss">
+@import '@/styles/variables.scss';
 .audit-logs-container {
   padding: 20px;
 }
@@ -285,7 +292,7 @@ export default {
 
 .page-header h2 {
   margin: 0;
-  color: #303133;
+  color: $dark-text-primary;
 }
 
 .header-actions {

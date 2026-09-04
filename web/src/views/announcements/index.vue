@@ -19,11 +19,11 @@
         @change="loadAnnouncements"
       >
         <el-option label="全部" value="" />
-        <el-option label="系统公告" value="System" />
-        <el-option label="维护通知" value="Maintenance" />
-        <el-option label="交易提醒" value="Trading" />
-        <el-option label="风控通知" value="Risk" />
-        <el-option label="活动推广" value="Promotion" />
+        <el-option label="系统公告" value="SYSTEM" />
+        <el-option label="维护通知" value="MAINTENANCE" />
+        <el-option label="交易提醒" value="TRADING" />
+        <el-option label="风控通知" value="RISK" />
+        <el-option label="活动推广" value="PROMOTION" />
       </el-select>
       <el-button size="small" icon="el-icon-refresh" @click="loadAnnouncements">刷新</el-button>
     </div>
@@ -36,7 +36,7 @@
         v-for="announcement in announcements"
         :key="announcement.id"
         class="announcement-card"
-        :class="{ 'urgent': announcement.priority === 'Urgent' }"
+        :class="{ 'urgent': announcement.priority === 'URGENT' }"
         @click="showDetail(announcement)"
       >
         <div class="card-header">
@@ -141,7 +141,7 @@ export default {
           return now >= from && now <= until
         })
         // 按优先级和时间排序
-        const priorityOrder = { 'Urgent': 0, 'High': 1, 'Normal': 2, 'Low': 3 }
+        const priorityOrder = { 'URGENT': 0, 'HIGH': 1, 'NORMAL': 2, 'LOW': 3 }
         this.announcements.sort((a, b) => {
           const pDiff = (priorityOrder[a.priority] || 3) - (priorityOrder[b.priority] || 3)
           if (pDiff !== 0) return pDiff
@@ -174,7 +174,7 @@ export default {
     },
 
     getPriorityType(priority) {
-      const map = { 'Urgent': 'danger', 'High': 'warning', 'Normal': 'info', 'Low': '' }
+      const map = { 'URGENT': 'danger', 'HIGH': 'warning', 'NORMAL': 'info', 'LOW': '' }
       return map[priority] || 'info'
     },
 

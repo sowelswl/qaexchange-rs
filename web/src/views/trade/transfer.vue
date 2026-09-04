@@ -23,7 +23,8 @@ export default {
 }
 </script>
 
-<style scoped>
+<style scoped lang="scss">
+@import '@/styles/variables.scss';
 .transfer-page {
   padding: 20px;
 }
@@ -34,7 +35,7 @@ export default {
 
 .page-header h2 {
   margin: 0 0 8px 0;
-  color: #333;
+  color: $dark-text-primary;
   font-size: 24px;
 }
 

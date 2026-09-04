@@ -247,7 +247,8 @@ export default {
 }
 </script>
 
-<style scoped>
+<style scoped lang="scss">
+@import '@/styles/variables.scss';
 .monitoring-container {
   padding: 20px;
 }
@@ -261,7 +262,7 @@ export default {
 
 .monitoring-header h2 {
   margin: 0;
-  color: #303133;
+  color: $dark-text-primary;
 }
 
 .status-cards {
@@ -323,7 +324,7 @@ export default {
   margin: 0 0 5px 0;
   font-size: 24px;
   font-weight: bold;
-  color: #303133;
+  color: $dark-text-primary;
 }
 
 .status-sub {

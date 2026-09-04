@@ -738,20 +738,21 @@ impl ExchangeServer {
             source_retention_secs: 3600, // 保留 1 小时
         };
 
-        match ConversionManager::new(storage_base, metadata_path, scheduler_config, worker_config) {
-            Ok(mut manager) => {
-                manager.start();
-                log::info!("✅ OLAP conversion system started");
-                log::info!("   Workers: 2");
-                log::info!("   Scan interval: 5 minutes");
-                log::info!("   Batch size: 3-20 SSTables");
-
-                // 保存到 Arc<Mutex> 以便共享
-                self.conversion_mgr = Some(Arc::new(parking_lot::Mutex::new(manager)));
-            }
-            Err(e) => {
-                log::error!("Failed to start OLAP conversion: {}", e);
-            }
+        // ✨ 走进程级单例 @yutiansut @quantaxis
+        //
+        // 原实现 `self.conversion_mgr = Some(..)` 需要 `&mut self`,
+        // 而 `start_http_server` 用 `Arc<Self>` 读 —— AppState 拿到的永远是 None,
+        // 监控接口 `olap.total_tasks` 恒为 0,**即使转换实际在工作**
+        // (实测已产出 6 个 Parquet,接口仍报 0)。
+        // 改成单例后,AppState 直接从单例取,与赋值时序无关。
+        self.conversion_mgr = qaexchange::storage::conversion::global_conversion_manager(
+            storage_base,
+            metadata_path,
+            scheduler_config,
+            worker_config,
+        );
+        if self.conversion_mgr.is_some() {
+            log::info!("✅ OLAP conversion system started (进程级单例)");
         }
     }
 
@@ -766,7 +767,12 @@ impl ExchangeServer {
             trade_recorder: self.matching_engine.get_trade_recorder(),
             user_mgr: self.user_mgr.clone(),
             storage_stats: self.storage_stats.clone(),
-            conversion_mgr: self.conversion_mgr.clone(),
+            // 优先用自身持有的;为 None 时回退到全局单例 ——
+            // 覆盖 `&mut self` 赋值发生在 Arc 化之后的时序问题。@yutiansut @quantaxis
+            conversion_mgr: self
+                .conversion_mgr
+                .clone()
+                .or_else(qaexchange::storage::conversion::get_global_conversion_manager),
             // Phase 14: 数据查询存储组件 @yutiansut @quantaxis
             market_data_storage: Some(self.market_data_storage.clone()),
             kline_wal_manager: Some(self.kline_wal_manager.clone()),

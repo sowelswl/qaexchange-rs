@@ -1161,36 +1161,40 @@ impl DiffHandler {
                 asks,
                 timestamp,
             } => {
-                // 转换为 DIFF quotes 格式 - 发送完整5档盘口 @yutiansut @quantaxis
+                // ✨ 推完整 10 档 —— 原先只推 5 档 @yutiansut @quantaxis
+                //
+                // 上游 `snapshot_broadcaster.rs` 调的是
+                // `get_orderbook_snapshot(&instrument_id, 10)`,事件里**本来就带 10 档**,
+                // 是这里构造 DIFF quote 时截断成了 5 档。
+                //
+                // 造成的现象:前端点「10档」→ HTTP 拿到 10 档、渲染出 10 档 →
+                // 下一帧 WS 快照到达 → 只有 5 档 → 覆盖回 5 档,
+                // 用户看到的就是「跳一下 10 档然后还是 5 档」。
+                let mut q = serde_json::Map::new();
+                q.insert("instrument_id".into(), serde_json::json!(instrument_id));
+                q.insert("datetime".into(), serde_json::json!(timestamp));
+                for i in 0..10 {
+                    // 缺档时写 null(与原先 `.map()` 产出 None → null 的行为一致),
+                    // 前端按 `price > 0` 过滤,不会把空档当成真实档位。
+                    q.insert(
+                        format!("bid_price{}", i + 1),
+                        serde_json::json!(bids.get(i).map(|b| b.price)),
+                    );
+                    q.insert(
+                        format!("bid_volume{}", i + 1),
+                        serde_json::json!(bids.get(i).map(|b| b.volume)),
+                    );
+                    q.insert(
+                        format!("ask_price{}", i + 1),
+                        serde_json::json!(asks.get(i).map(|a| a.price)),
+                    );
+                    q.insert(
+                        format!("ask_volume{}", i + 1),
+                        serde_json::json!(asks.get(i).map(|a| a.volume)),
+                    );
+                }
                 Some(serde_json::json!({
-                    "quotes": {
-                        instrument_id: {
-                            "instrument_id": instrument_id,
-                            "datetime": timestamp,
-                            // 买盘5档
-                            "bid_price1": bids.get(0).map(|b| b.price),
-                            "bid_volume1": bids.get(0).map(|b| b.volume),
-                            "bid_price2": bids.get(1).map(|b| b.price),
-                            "bid_volume2": bids.get(1).map(|b| b.volume),
-                            "bid_price3": bids.get(2).map(|b| b.price),
-                            "bid_volume3": bids.get(2).map(|b| b.volume),
-                            "bid_price4": bids.get(3).map(|b| b.price),
-                            "bid_volume4": bids.get(3).map(|b| b.volume),
-                            "bid_price5": bids.get(4).map(|b| b.price),
-                            "bid_volume5": bids.get(4).map(|b| b.volume),
-                            // 卖盘5档
-                            "ask_price1": asks.get(0).map(|a| a.price),
-                            "ask_volume1": asks.get(0).map(|a| a.volume),
-                            "ask_price2": asks.get(1).map(|a| a.price),
-                            "ask_volume2": asks.get(1).map(|a| a.volume),
-                            "ask_price3": asks.get(2).map(|a| a.price),
-                            "ask_volume3": asks.get(2).map(|a| a.volume),
-                            "ask_price4": asks.get(3).map(|a| a.price),
-                            "ask_volume4": asks.get(3).map(|a| a.volume),
-                            "ask_price5": asks.get(4).map(|a| a.price),
-                            "ask_volume5": asks.get(4).map(|a| a.volume),
-                        }
-                    }
+                    "quotes": { instrument_id: serde_json::Value::Object(q) }
                 }))
             }
 
@@ -1326,8 +1330,19 @@ impl DiffHandler {
                     ctx_addr.do_send(SendDiffMessage { message: rtn_data });
                 }
                 None => {
-                    // 超时或用户不存在（正常情况：无数据更新）@yutiansut @quantaxis
-                    log::debug!("peek_message timeout for user: {}", user_id);
+                    // ✨ 超时也必须回包 —— 原先只 log::debug 什么都不发。
+                    //
+                    // DIFF 是「客户端 peek → 服务端在有数据或超时时回 rtn_data →
+                    // 客户端收到后再 peek」的长轮询环。服务端超时不回包,客户端就
+                    // 永远收不到响应,也无从发下一个 peek —— 整条实时链路静默停摆:
+                    // socket 仍是 CONNECTED、无报错、无重连,页面就是不再更新。
+                    // 服务端 peek 超时是 30 秒(protocol/diff/snapshot.rs:153),
+                    // 即只要 30 秒无任何 patch,这个连接的数据流就死了。
+                    //
+                    // 回一个空 data 的 rtn_data,把环续上。 @yutiansut @quantaxis
+                    log::debug!("peek_message timeout for user: {}, sending empty rtn_data", user_id);
+                    let rtn_data = DiffServerMessage::RtnData { data: vec![] };
+                    ctx_addr.do_send(SendDiffMessage { message: rtn_data });
                 }
             }
         });

@@ -696,6 +696,12 @@ pub async fn query_position(
                     cost_short: pos.open_price_short,
                     profit_long: pos.float_profit_long(),
                     profit_short: pos.float_profit_short(),
+                    // ✨ 真实保证金/市价,替代前端的 ×300 与 15% 硬编码 @yutiansut @quantaxis
+                    margin_long: pos.margin_long,
+                    margin_short: pos.margin_short,
+                    last_price: pos.lastest_price,
+                    position_cost_long: pos.position_cost_long,
+                    position_cost_short: pos.position_cost_short,
                 });
             }
 
@@ -742,6 +748,12 @@ pub async fn query_positions_by_user(
                 cost_short: pos.open_price_short,
                 profit_long: pos.float_profit_long(),
                 profit_short: pos.float_profit_short(),
+                // ✨ 同上
+                margin_long: pos.margin_long,
+                margin_short: pos.margin_short,
+                last_price: pos.lastest_price,
+                position_cost_long: pos.position_cost_long,
+                position_cost_short: pos.position_cost_short,
             });
         }
     }

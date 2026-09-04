@@ -6,7 +6,7 @@
     </div>
 
     <!-- 标签页 -->
-    <el-tabs v-model="activeTab" class="tabs-container">
+    <el-tabs v-model="activeTab" class="tabs-container" @tab-click="onTabClick">
       <!-- 日终结算操作 -->
       <el-tab-pane label="日终结算" name="daily">
         <el-card class="settlement-card">
@@ -353,6 +353,9 @@ export default {
   },
   mounted() {
     this.loadHistory()
+    // ⚠️ 此时 activeTab='daily',图表容器在隐藏的 statistics pane 内,宽度为 0,
+    //    echarts 会把 0 宽缓存下来 → 切过去后画布永远空白。
+    //    真正的尺寸修正在 onTabClick 里做。 @yutiansut @quantaxis
     this.initChart()
   },
   beforeDestroy() {
@@ -364,6 +367,18 @@ export default {
     }
   },
   methods: {
+    // 切到「结算统计」时才有真实宽度,此时重新测量画布。
+    // 若 mount 时 init 失败(容器不存在)则补一次 init。 @yutiansut @quantaxis
+    onTabClick(tab) {
+      if ((tab && tab.name) !== 'statistics') return
+      this.$nextTick(() => {
+        if (this.chartInstance) {
+          this.chartInstance.resize()
+        } else {
+          this.initChart()
+        }
+      })
+    },
     // 加载结算历史
     async loadHistory() {
       this.historyLoading = true

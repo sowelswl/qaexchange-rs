@@ -299,7 +299,19 @@ impl MarketSnapshotGenerator {
             .get_orderbook(instrument_id)
             .ok_or_else(|| format!("Orderbook not found for {}", instrument_id))?;
 
-        let mut ob = orderbook.write();
+        // ✨ 只读快照,用读锁 —— 原为 `orderbook.write()` @yutiansut @quantaxis
+        //
+        // 写锁是 `ob.get_depth()`(下方已注释掉)留下的遗迹。本函数对订单簿的
+        // 全部访问都是只读:`bid_queue.get_sorted_orders()` /
+        // `ask_queue.get_sorted_orders()` / `lastprice`。
+        //
+        // 用写锁的两个代价:
+        // ① **活性**:此处是全仓库唯一把「订单簿锁」和「daily_stats 锁」嵌套起来的
+        //    地方(:382 `self.daily_stats.write()`),中间没有 drop,独占锁一攥 80 行。
+        // ② **吞吐**:快照线程每轮对**每个合约**独占订单簿,期间该合约所有撮合
+        //    (order_router.rs:964 `orderbook.write()`)全部排队;parking_lot 写优先
+        //    还会连带把 `get_orderbook_snapshot` 的读者一起挡住。
+        let ob = orderbook.read();
 
         // 获取买卖五档（qars 的 get_depth 不带参数，需要手动提取前5档）
         //ob.get_depth(); // 更新内部深度

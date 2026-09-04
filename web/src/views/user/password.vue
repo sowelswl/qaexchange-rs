@@ -12,7 +12,7 @@
           <div slot="header">
             <span>修改交易密码</span>
           </div>
-          <el-form :model="tradingPasswordForm" :rules="passwordRules" ref="tradingPasswordForm" label-width="100px">
+          <el-form :model="tradingPasswordForm" :rules="tradingPasswordRules" ref="tradingPasswordForm" label-width="100px">
             <el-form-item label="账户ID" prop="account_id">
               <el-select v-model="tradingPasswordForm.account_id" placeholder="请选择账户" style="width: 100%">
                 <el-option
@@ -60,7 +60,7 @@
           <div slot="header">
             <span>修改资金密码</span>
           </div>
-          <el-form :model="fundPasswordForm" :rules="passwordRules" ref="fundPasswordForm" label-width="100px">
+          <el-form :model="fundPasswordForm" :rules="fundPasswordRules" ref="fundPasswordForm" label-width="100px">
             <el-form-item label="账户ID" prop="account_id">
               <el-select v-model="fundPasswordForm.account_id" placeholder="请选择账户" style="width: 100%">
                 <el-option
@@ -131,10 +131,18 @@ export default {
   name: 'PasswordManagement',
 
   data() {
-    const validateConfirmPassword = (rule, value, callback) => {
-      const formName = rule.field.includes('trading') ? 'tradingPasswordForm' : 'fundPasswordForm'
-      const form = formName === 'tradingPasswordForm' ? this.tradingPasswordForm : this.fundPasswordForm
-      if (value !== form.new_password) {
+    // ✨ 校验器必须**按表单绑定**,不能靠 rule.field 猜 @yutiansut @quantaxis
+    //
+    // 原实现:`rule.field.includes('trading') ? 交易表单 : 资金表单`。
+    // 但两个 el-form-item 的 prop 都叫 `confirm_password`(:42 与 :90),
+    // `rule.field` 就是这个 prop 字符串,两边完全一样、恒不含 'trading',
+    // 于是**交易密码**的确认值永远拿去和**资金密码表单**的 new_password 比
+    // (通常是空串)→ 交易密码永远报「两次输入的密码不一致」,改不了。
+    // 资金密码那半边反而恰好正常。
+    //
+    // 改法:为每个表单各造一个闭包,直接捕获目标表单,不依赖 field 名。
+    const confirmValidatorFor = (formKey) => (rule, value, callback) => {
+      if (value !== this[formKey].new_password) {
         callback(new Error('两次输入的密码不一致'))
       } else {
         callback()
@@ -156,7 +164,7 @@ export default {
         new_password: '',
         confirm_password: ''
       },
-      passwordRules: {
+      tradingPasswordRules: {
         account_id: [{ required: true, message: '请选择账户', trigger: 'change' }],
         old_password: [{ required: true, message: '请输入旧密码', trigger: 'blur' }],
         new_password: [
@@ -165,7 +173,19 @@ export default {
         ],
         confirm_password: [
           { required: true, message: '请再次输入新密码', trigger: 'blur' },
-          { validator: validateConfirmPassword, trigger: 'blur' }
+          { validator: confirmValidatorFor('tradingPasswordForm'), trigger: 'blur' }
+        ]
+      },
+      fundPasswordRules: {
+        account_id: [{ required: true, message: '请选择账户', trigger: 'change' }],
+        old_password: [{ required: true, message: '请输入旧密码', trigger: 'blur' }],
+        new_password: [
+          { required: true, message: '请输入新密码', trigger: 'blur' },
+          { min: 6, max: 20, message: '密码长度6-20位', trigger: 'blur' }
+        ],
+        confirm_password: [
+          { required: true, message: '请再次输入新密码', trigger: 'blur' },
+          { validator: confirmValidatorFor('fundPasswordForm'), trigger: 'blur' }
         ]
       }
     }
@@ -255,7 +275,8 @@ export default {
 }
 </script>
 
-<style scoped>
+<style scoped lang="scss">
+@import '@/styles/variables.scss';
 .password-container {
   padding: 20px;
 }
@@ -266,7 +287,7 @@ export default {
 
 .page-header h2 {
   margin: 0;
-  color: #303133;
+  color: $dark-text-primary;
 }
 
 .password-card {

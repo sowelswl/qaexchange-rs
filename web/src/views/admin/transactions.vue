@@ -34,7 +34,7 @@
         end-placeholder="结束日期"
         style="width: 300px; margin-right: 10px"
       />
-      <el-button type="primary" icon="el-icon-search" @click="fetchTransactions">查询</el-button>
+      <el-button type="primary" icon="el-icon-search" @click="handleSearch">查询</el-button>
       <el-button icon="el-icon-refresh" @click="resetFilters">重置</el-button>
       <el-button icon="el-icon-download" @click="exportData">导出Excel</el-button>
     </div>
@@ -136,7 +136,10 @@
           :total="pagination.total"
           :page-size="pagination.pageSize"
           :current-page="pagination.page"
-          :page-sizes="[20, 50, 100, 200]"
+          <!-- ✨ 去掉 200 —— 后端 management.rs:420 是 .min(100),
+               前端按 200 算页数、后端按 100 取偏移,每页会漏掉 100 条且永远看不到。
+               audit-logs.vue 已经是 [20,50,100]。 @yutiansut @quantaxis -->
+          :page-sizes="[20, 50, 100]"
           @current-change="handlePageChange"
           @size-change="handleSizeChange"
         />
@@ -204,6 +207,12 @@ export default {
     this.fetchTransactions()
   },
   methods: {
+      // ✨ 查询必须重置页码 —— 否则在第 3 页上改筛选条件,
+      //    会带着 page=3 去请求新的结果集,拿到空表。 @yutiansut @quantaxis
+    handleSearch() {
+      this.pagination.page = 1
+      this.fetchTransactions()
+    },
     async fetchTransactions() {
       this.loading = true
       try {
@@ -256,7 +265,10 @@ export default {
       const start = new Date()
       start.setDate(start.getDate() - 7)
       this.dateRange = [start, end]
-      this.transactions = []
+      // ✨ 原先只把 transactions 置空就结束 —— 表格清空后不再加载,
+      //    用户以为「没有数据」。重置页码并重新拉取。 @yutiansut @quantaxis
+      this.pagination.page = 1
+      this.fetchTransactions()
     },
     formatDate(date) {
       const year = date.getFullYear()

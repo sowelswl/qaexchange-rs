@@ -597,8 +597,17 @@ export default {
      * 初始化 WebSocket 连接
      */
     initWebSocket() {
-      // 获取用户ID用于连接
-      const userId = (this.currentUser && this.currentUser.user_id) || this.selectedAccountId || 'anonymous'
+      // ✨ 订阅键必须是 **account_id** 而不是 user_id @yutiansut @quantaxis
+      //
+      // 与 store/modules/websocket.js:163-171 保持一致(那里记着实测结论):
+      //   ws://.../ws/diff?user_id=<用户 UUID>  → patch 只有 quotes / notify / ins_list
+      //   ws://.../ws/diff?user_id=ACC_xxxxxx   → patch 还有 trades / orders / accounts
+      // 后端 trade_gateway.rs:1660 的账户 patch 明确 push_patch(&account_id, ..),
+      // account_id 形如 `ACC_<uuid>`(account_mgr.rs:108),与 user_id 是两个命名空间。
+      //
+      // 原先 user_id 优先 → 本页的成交/委托/账户三类推送全部收不到,
+      // 只能靠 5 秒 HTTP 轮询兜底。这里把顺序对调。
+      const userId = this.selectedAccountId || (this.currentUser && this.currentUser.user_id) || 'anonymous'
 
       this.ws = new WebSocketManager({
         autoConnect: false,
@@ -730,8 +739,16 @@ export default {
         const bids = []
         const asks = []
 
-        // 解析买盘（bid_price1~5, bid_volume1~5）
-        for (let i = 1; i <= 5; i++) {
+        // ✨ 解析到 10 档 —— 原先写死 5 档 @yutiansut @quantaxis
+        //
+        // 后端 DIFF quote 现在推 bid_price1~10 / ask_price1~10
+        // (diff_handler.rs 的 quote 构造)。原先这里写死 `i <= 5`,
+        // 于是点「10档」后:HTTP 拿到 10 档渲染出来 → 下一帧 WS 快照只解析 5 档
+        // → 覆盖回 5 档,表现为「跳一下 10 档然后还是 5 档」。
+        const MAX_LEVELS = 10
+
+        // 解析买盘（bid_price1~10, bid_volume1~10）
+        for (let i = 1; i <= MAX_LEVELS; i++) {
           const price = quote[`bid_price${i}`]
           const volume = quote[`bid_volume${i}`]
           if (price && price > 0) {
@@ -739,8 +756,8 @@ export default {
           }
         }
 
-        // 解析卖盘（ask_price1~5, ask_volume1~5）
-        for (let i = 1; i <= 5; i++) {
+        // 解析卖盘（ask_price1~10, ask_volume1~10）
+        for (let i = 1; i <= MAX_LEVELS; i++) {
           const price = quote[`ask_price${i}`]
           const volume = quote[`ask_volume${i}`]
           if (price && price > 0) {

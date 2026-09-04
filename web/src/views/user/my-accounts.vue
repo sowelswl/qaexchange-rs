@@ -424,8 +424,14 @@ export default {
 
     async handleDepositConfirm() {
       try {
+        // ✨ 字段名叫 user_id,但后端要的是 **account_id** @yutiansut @quantaxis
+        //
+        // handlers.rs:789-802 的逻辑:值不以 `ACC_` 开头就按 user 反查账户,
+        // 该用户有多个账户时直接报错要求指定 account_id。
+        // 原先传登录 UUID(this.currentUser),对任何拥有 ≥2 个账户的真实用户
+        // 必然失败。同项目 accounts/index.vue:335-337 已是正确写法,还带注释。
         await deposit({
-          user_id: this.currentUser,
+          user_id: (this.currentAccount && this.currentAccount.account_id) || this.currentUser,
           amount: this.depositForm.amount
         })
         this.$message.success('入金成功')
@@ -444,8 +450,9 @@ export default {
 
     async handleWithdrawConfirm() {
       try {
+        // ✨ 同上:传 account_id 而非登录 UUID @yutiansut @quantaxis
         await withdraw({
-          user_id: this.currentUser,
+          user_id: (this.currentAccount && this.currentAccount.account_id) || this.currentUser,
           amount: this.withdrawForm.amount
         })
         this.$message.success('出金成功')

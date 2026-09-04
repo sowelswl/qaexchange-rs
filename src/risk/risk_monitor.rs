@@ -341,25 +341,50 @@ impl RiskMonitor {
         let mut liquidation_count = 0u64;
         let mut alert_count = 0u64;
 
+        // ✨ 行情快照必须在**账户锁之外**取 —— 这是死锁的根因 @yutiansut @quantaxis
+        //
+        // 原实现在 `let mut acc = account.write();` 之内调
+        // `engine.get_last_price()`(→ `orderbook.read()`),形成锁序
+        //     账户写锁 → 订单簿读锁
+        // 而这是全仓库唯一的这个方向。撮合/撤单路径是反向的
+        // (订单簿锁 → 账户锁),两者相遇即成环。
+        //
+        // 2026-09-04 实测:带此改动的二进制分别在 60 秒 / 9 分钟 / 26.5 分钟挂死;
+        // 挂死瞬间的 core 里,本线程正持 `account.write()` 阻塞在 `lock_shared_slow`,
+        // 同时 8 个 `get_account_stats` 线程堵在 `account.read()` 上。
+        // 延迟曲线是**阶跃**(上一采样 10ms 全绿,下一采样三个业务端点同时永久超时),
+        // 确认是死锁而非锁护送。
+        //
+        // 改法:每轮开始时一次性取全部合约的最新价,之后进账户锁只做纯内存更新。
+        // 副作用是更快 —— N 个合约查 1 次,而不是「账户数 × 持仓数」次。
+        let price_snapshot: std::collections::HashMap<String, f64> = {
+            match self.price_source.read().as_ref() {
+                Some(engine) => engine
+                    .get_instruments()
+                    .into_iter()
+                    .filter_map(|code| {
+                        engine
+                            .get_last_price(&code)
+                            .filter(|p| *p > 0.0)
+                            .map(|p| (code, p))
+                    })
+                    .collect(),
+                None => std::collections::HashMap::new(),
+            }
+        };
+        let price_ts = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
+
         for account in accounts.iter() {
             let mut acc = account.write();
             let account_id = acc.account_cookie.clone();
 
-            // ✨ 盯市刷价 —— 必须在算 risk_ratio 之前 @yutiansut @quantaxis
-            //
-            // 用行情最新价刷新该账户所有持仓,否则下面算出的 risk_ratio /
-            // balance / position_profit 全部建立在「该账户最后一次成交价」上。
-            // qars 的 `get_code_subscribed()` 就是为这个场景准备的
-            // (account.rs:604 留着正确用法的注释,是注释掉的),此前生产零调用。
-            //
-            // 本循环已持写锁,刷价零额外锁开销。
-            if let Some(engine) = self.price_source.read().as_ref() {
-                let now = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
+            // 盯市刷价 —— 必须在算 risk_ratio 之前。
+            // 价格来自本轮开始时在**锁外**取好的快照(见上方注释),
+            // 这里只做纯内存更新,不再碰任何外部锁。
+            if !price_snapshot.is_empty() {
                 for code in acc.get_code_subscribed() {
-                    if let Some(px) = engine.get_last_price(&code) {
-                        if px > 0.0 {
-                            acc.on_price_change(code, px, now.clone());
-                        }
+                    if let Some(&px) = price_snapshot.get(&code) {
+                        acc.on_price_change(code, px, price_ts.clone());
                     }
                 }
             }

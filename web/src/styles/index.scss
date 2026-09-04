@@ -1226,3 +1226,60 @@ $tag-tints: (
   border-color: $dark-border;
   color: $dark-text-muted;
 }
+
+// ── HQChart 弹出框(tooltip)的暗色适配 ──────────────────────────
+// @yutiansut @quantaxis
+//
+// HQChart 的 tooltip 是 **DOM 元素**不是画在 canvas 上的,
+// 所以 `JSChart.SetStyle(BLACK_ID)`(KLineChart.vue:50)管不到它们 ——
+// 那个只改画布配色(坐标轴、网格、K线体)。
+//
+// 而且本项目**从未引入** HQChart 自带的 `umychart.resource/css/tools.css`
+// (既不在 main.js、也不在 public/index.html),于是这些 div 是
+// **完全无样式**的裸元素:浏览器默认透明背景 + 黑色文字,
+// 落在深色页面上就是「黑字压深底」几乎不可读,还没有边框和内边距。
+//
+// 类名来自 umychart.js 的 8 处 `className=` 赋值
+// (:3335 / :8787 / :8815 / :8848 / :8876 / :8904 / :8933 / :8962)。
+// 库只设 className 与定位(left/top/width/display),外观全交给 CSS,
+// 所以这里补齐即可,不必改 node_modules。
+.jschart-tooltip,
+.jchart-klineinfo-tooltip,
+.jchart-klinetrade-tooltip,
+.jchart-minuteinfo-tooltip,
+.jchart-iconinfo-tooltip,
+.jchart-chartox-tooltip,
+.jchart-charscatterplot-tooltip {
+  background: rgba(22, 27, 34, 0.96) !important;
+  border: 1px solid rgba(240, 246, 252, 0.18) !important;
+  border-radius: 4px !important;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.55) !important;
+  color: $dark-text-primary !important;
+  box-sizing: border-box;
+  padding: 8px 10px;
+  font-size: 12px;
+  line-height: 1.7;
+  // 数字用等宽,避免逐帧跳动(与 .el-table 数字列同一处理)
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;   // 不要挡住鼠标在图上的取值
+
+  span,
+  div,
+  td,
+  th {
+    color: inherit;
+  }
+}
+
+// 库内层类:标题/正文/数值。原 tools.css 里是 #2b3645 深色字,
+// 在暗底上同样不可读。
+.tooltip-title {
+  color: $dark-text-primary !important;
+  font-weight: 600;
+}
+.tooltip-con {
+  color: rgba(240, 246, 252, 0.72) !important;
+}
+.tooltip-num {
+  font-variant-numeric: tabular-nums;
+}

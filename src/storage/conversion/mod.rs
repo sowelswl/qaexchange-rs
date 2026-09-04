@@ -66,6 +66,64 @@ use std::sync::{Arc, Mutex};
 /// 转换系统管理器
 ///
 /// 整合调度器和 Worker 线程池，提供统一的启动/停止接口
+// ==================== 进程级单例 ====================
+// @yutiansut @quantaxis
+//
+// ⚠️ 本系统曾同时跑 **7 个** ConversionManager:
+//   · main.rs:714 `start_olap_conversion()`      1 个
+//   · hybrid/oltp.rs:157 每个 store 各建一个      6 个
+//     (market_data / __ACCOUNT__ / IF2501 / IF2502 / IH2501 / IC2501)
+//
+// 而路径 B 的每一个都用 `PathBuf::from(&config.base_path)` **扫描整个存储根目录**,
+// 不是各扫各的品种 —— 于是 7 个扫描器抢同一批 SST,靠各自的
+// `conversion_metadata.json`(7 份,路径不同)去重,谁先抢到就谁转换,
+// 其余 6 份元数据里没有这条记录 → 重复转换风险。
+//
+// 更糟的是 `main.rs` 那个赋值给 `self.conversion_mgr`(需要 `&mut self`),
+// 而 `start_http_server` 用 `Arc<Self>` 读 —— 监控接口拿到的永远是 None,
+// `olap.total_tasks` 恒为 0,**即使转换实际在工作**
+// (实测已产出 6 个 Parquet,而接口仍报 0)。
+//
+// 统一成进程级单例:第一个调用者创建并 start(),其余共享同一个实例。
+static GLOBAL_CONVERSION_MANAGER: once_cell::sync::OnceCell<
+    std::sync::Arc<parking_lot::Mutex<ConversionManager>>,
+> = once_cell::sync::OnceCell::new();
+
+/// 获取或创建进程级唯一的 ConversionManager
+///
+/// 首次调用会创建并 `start()`;后续调用直接返回同一个实例,
+/// 传入的 config 被忽略(以首个创建者的为准)。
+pub fn global_conversion_manager(
+    storage_base: std::path::PathBuf,
+    metadata_path: std::path::PathBuf,
+    scheduler_config: SchedulerConfig,
+    worker_config: WorkerConfig,
+) -> Option<std::sync::Arc<parking_lot::Mutex<ConversionManager>>> {
+    if let Some(m) = GLOBAL_CONVERSION_MANAGER.get() {
+        return Some(m.clone());
+    }
+    match ConversionManager::new(storage_base, metadata_path, scheduler_config, worker_config) {
+        Ok(mut manager) => {
+            manager.start();
+            let arc = std::sync::Arc::new(parking_lot::Mutex::new(manager));
+            // 竞态下只有一个能 set 成功,失败者用已存在的那个
+            let _ = GLOBAL_CONVERSION_MANAGER.set(arc.clone());
+            log::info!("✅ 全局 ConversionManager 已创建(进程内唯一)");
+            GLOBAL_CONVERSION_MANAGER.get().cloned()
+        }
+        Err(e) => {
+            log::error!("创建全局 ConversionManager 失败: {}", e);
+            None
+        }
+    }
+}
+
+/// 取已创建的全局实例(不创建)
+pub fn get_global_conversion_manager(
+) -> Option<std::sync::Arc<parking_lot::Mutex<ConversionManager>>> {
+    GLOBAL_CONVERSION_MANAGER.get().cloned()
+}
+
 pub struct ConversionManager {
     metadata: Arc<Mutex<ConversionMetadata>>,
     scheduler: Arc<ConversionScheduler>,

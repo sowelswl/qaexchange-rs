@@ -154,26 +154,19 @@ impl OltpHybridStorage {
             let scheduler_config = SchedulerConfig::default();
             let worker_config = WorkerConfig::default();
 
-            match ConversionManager::new(
+            // ✨ 用进程级单例,不再每个 store 各建一个 @yutiansut @quantaxis
+            //
+            // 原实现每个 store 都 new 一个 ConversionManager,而它们的
+            // storage_base 都是 `config.base_path`(整个存储根),等于 N 个扫描器
+            // 抢同一批 SST,各写各的 conversion_metadata.json → 去重失效。
+            // 实测本机跑了 6 个(market_data/__ACCOUNT__/IF2501/IF2502/IH2501/IC2501)
+            // 外加 main.rs 那个,共 7 个。
+            crate::storage::conversion::global_conversion_manager(
                 PathBuf::from(&config.base_path),
                 metadata_path,
                 scheduler_config,
                 worker_config,
-            ) {
-                Ok(mut manager) => {
-                    manager.start();
-                    log::info!("[{}] OLAP conversion manager started", instrument_id);
-                    Some(Arc::new(parking_lot::Mutex::new(manager)))
-                }
-                Err(e) => {
-                    log::warn!(
-                        "[{}] Failed to create conversion manager: {}. OLAP conversion disabled.",
-                        instrument_id,
-                        e
-                    );
-                    None
-                }
-            }
+            )
         } else {
             None
         };

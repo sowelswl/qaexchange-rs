@@ -44,7 +44,7 @@
         <el-option label="活跃" value="active"></el-option>
         <el-option label="冻结" value="frozen"></el-option>
       </el-select>
-      <el-button type="primary" icon="el-icon-search" @click="fetchAccounts">查询</el-button>
+      <el-button type="primary" icon="el-icon-search" @click="handleSearch">查询</el-button>
       <el-button icon="el-icon-refresh" @click="resetFilters">重置</el-button>
     </div>
 
@@ -271,6 +271,12 @@ export default {
     this.fetchAccounts()
   },
   methods: {
+      // ✨ 查询必须重置页码 —— 否则在第 3 页上改筛选条件,
+      //    会带着 page=3 去请求新的结果集,拿到空表。 @yutiansut @quantaxis
+    handleSearch() {
+      this.pagination.currentPage = 1
+      this.fetchAccounts()
+    },
     async fetchAccounts() {
       this.loading = true
       try {
