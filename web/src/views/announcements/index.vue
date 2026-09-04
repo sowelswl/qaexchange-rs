@@ -87,9 +87,9 @@
           <span class="detail-date">发布时间: {{ formatDate(selectedAnnouncement.created_at) }}</span>
         </div>
         <div class="detail-body" v-html="selectedAnnouncement.content"></div>
-        <div v-if="selectedAnnouncement.effective_until" class="detail-validity">
+        <div v-if="selectedAnnouncement.expire_time" class="detail-validity">
           <i class="el-icon-time"></i>
-          有效期至: {{ formatDate(selectedAnnouncement.effective_until) }}
+          有效期至: {{ formatDate(selectedAnnouncement.expire_time) }}
         </div>
       </div>
       <span slot="footer" class="dialog-footer">
@@ -136,8 +136,8 @@ export default {
         // 过滤有效期内的公告
         const now = Date.now()
         this.announcements = (res.announcements || []).filter(a => {
-          const from = a.effective_from ? a.effective_from * 1000 : 0
-          const until = a.effective_until ? a.effective_until * 1000 : Number.MAX_SAFE_INTEGER
+          const from = a.publish_time ? a.publish_time : 0
+          const until = a.expire_time ? a.expire_time : Number.MAX_SAFE_INTEGER
           return now >= from && now <= until
         })
         // 按优先级和时间排序

@@ -35,7 +35,7 @@
       </el-form>
 
       <el-row :gutter="20" style="margin-bottom: 20px">
-        <el-col :span="6">
+        <el-col :xs="24" :sm="12" :lg="6">
           <el-card shadow="hover">
             <div class="stat-item">
               <div class="stat-label">今日成交</div>
@@ -43,7 +43,7 @@
             </div>
           </el-card>
         </el-col>
-        <el-col :span="6">
+        <el-col :xs="24" :sm="12" :lg="6">
           <el-card shadow="hover">
             <div class="stat-item">
               <div class="stat-label">成交金额</div>
@@ -51,7 +51,7 @@
             </div>
           </el-card>
         </el-col>
-        <el-col :span="6">
+        <el-col :xs="24" :sm="12" :lg="6">
           <el-card shadow="hover">
             <div class="stat-item">
               <div class="stat-label">买入笔数</div>
@@ -59,7 +59,7 @@
             </div>
           </el-card>
         </el-col>
-        <el-col :span="6">
+        <el-col :xs="24" :sm="12" :lg="6">
           <el-card shadow="hover">
             <div class="stat-item">
               <div class="stat-label">卖出笔数</div>
@@ -69,17 +69,21 @@
         </el-col>
       </el-row>
 
+      <!-- ✨ 表格高度改为跟随视口, 不再写死 500px @yutiansut @quantaxis
+           实测 1366x768: 筛选表单+统计卡片占 304px; 原 500px 令表格底部溢出 112px
+           var(--qa-content-h) 由 layout/index.vue 统一定义 = 100vh - 56(顶栏) - 40(padding),
+           有公告条时自动再减 40px; max(260px, ...) 是极短视口下的兜底 -->
       <el-table
         :data="tradeList"
         border
         stripe
-        height="500"
+        :height="'max(260px, calc(var(--qa-content-h, calc(100vh - 96px)) - 304px))'"
         :loading="loading"
         show-overflow
       >
-        <el-table-column prop="trade_id" label="成交编号" width="200" />
-        <el-table-column prop="order_id" label="订单编号" width="200" />
-        <el-table-column prop="instrument_id" label="合约" width="100" />
+        <el-table-column prop="trade_id" label="成交编号" min-width="160" show-overflow-tooltip/>
+        <el-table-column prop="order_id" label="订单编号" min-width="200" show-overflow-tooltip/>
+        <el-table-column prop="instrument_id" label="合约" min-width="100" show-overflow-tooltip/>
         <el-table-column prop="direction" label="方向" width="80" align="center">
           <template slot-scope="scope">
             <el-tag :type="scope.row.direction === 'BUY' ? 'danger' : 'success'" size="mini">
@@ -87,30 +91,30 @@
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="is_taker" label="主动/被动" width="100" align="center">
+        <el-table-column prop="is_taker" label="主动/被动" min-width="80" align="center">
           <template slot-scope="scope">
             <el-tag :type="scope.row.is_taker ? 'warning' : 'info'" size="mini">
               {{ scope.row.is_taker ? '主动成交' : '被动成交' }}
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="price" label="成交价" width="100" align="right">
+        <el-table-column prop="price" label="成交价" min-width="100" align="right">
           <template slot-scope="scope">
             {{ scope.row.price.toFixed(2) }}
           </template>
         </el-table-column>
         <el-table-column prop="volume" label="成交量" width="80" align="right" />
-        <el-table-column prop="trade_amount" label="成交额" width="130" align="right">
+        <el-table-column prop="trade_amount" label="成交额" min-width="130" align="right">
           <template slot-scope="scope">
             ¥{{ formatNumber(scope.row.trade_amount) }}
           </template>
         </el-table-column>
-        <el-table-column prop="commission" label="手续费" width="100" align="right">
+        <el-table-column prop="commission" label="手续费" min-width="100" align="right">
           <template slot-scope="scope">
             ¥{{ scope.row.commission.toFixed(2) }}
           </template>
         </el-table-column>
-        <el-table-column prop="trade_time" label="成交时间" width="160" />
+        <el-table-column prop="trade_time" label="成交时间" min-width="160" />
         <el-table-column label="操作" width="100" fixed="right">
           <template slot-scope="scope">
             <el-button type="text" size="small" @click="handleViewDetail(scope.row)">
@@ -186,7 +190,19 @@ export default {
             price: trade.price,
             volume: trade.volume,
             trade_amount: trade.price * trade.volume * multiplier,
-            commission: trade.price * trade.volume * multiplier * 0.0001,
+            // ⚠️ 手续费用后端返回的真值,不要自己算。
+            // 原来这里写 `* multiplier * 0.0001` —— 那是全系统第三个费率:
+            //   qars 真实扣费  preset.calc_commission(IF coeff = 2.301e-05)
+            //   通知 payload   0.0003
+            //   本处(编的)     0.0001
+            // 实测 IF 3798×2 手:真实扣 52.44,而这里显示 227.88(高 4.3 倍)。
+            // 后端 TradeRecord / UserTradeView 已补 commission 字段。
+            // 保留回退:字段缺失时用旧估算并告警,避免旧版后端上表格空白。
+            // @yutiansut @quantaxis
+            commission: (trade.commission !== undefined && trade.commission !== null)
+              ? trade.commission
+              : (console.warn('[trades] 后端未返回 commission,回退估算'),
+                 trade.price * trade.volume * multiplier * 0.0001),
             trade_time: new Date(trade.timestamp / 1000000).toLocaleString('zh-CN'),
             is_taker: trade.is_taker, // 是否为主动方
             opposite_order_id: trade.opposite_order_id // 对手方订单ID

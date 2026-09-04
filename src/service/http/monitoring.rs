@@ -290,20 +290,20 @@ fn get_account_stats(account_mgr: &AccountManager) -> AccountStats {
         total_deposit += acc.accounts.deposit;
         total_withdraw += acc.accounts.withdraw;
 
-        // 计算总权益和保证金（简化版本）
-        let mut account_balance = acc.money;
-        let mut margin_used = 0.0;
-
-        for position in acc.hold.values() {
-            let long_value = position.volume_long_unmut() * position.lastest_price;
-            let short_value = position.volume_short_unmut() * position.lastest_price;
-            let position_value = long_value + short_value;
-            account_balance += position_value;
-            margin_used += position_value * 0.15; // 假设15%保证金
-        }
-
-        total_balance += account_balance;
-        total_margin_used += margin_used;
+        // 总权益与保证金 —— 直接读账户自己的值,不要自己重算 @yutiansut @quantaxis
+        //
+        // ⚠️ 原实现自己遍历持仓重算,踩了两个坑,叠加后误差 381 倍
+        //   (实测:本接口报总保证金 1,035 万,而逐账户求和是 39.48 亿):
+        //     ① `volume * lastest_price` **漏了合约乘数**(IF 是 300)
+        //        —— 与 order_router / pre_trade_check 同一个病(见 L21)
+        //     ② `position_value * 0.15`「假设15%保证金」写死,
+        //        既不是合约真实保证金率,也**完全不计冻结保证金**
+        //
+        // `acc.accounts.balance / margin` 由 `risk::risk_monitor` 每秒回写
+        // (monitor_interval_ms 默认 1000),所以读锁路径就能拿到 ≤1s 新鲜的真值,
+        // 不必为 get_margin() 升级写锁。口径与 management.rs:110 一致。
+        total_balance += acc.accounts.balance;
+        total_margin_used += acc.accounts.margin;
     }
 
     AccountStats {
@@ -500,7 +500,12 @@ pub async fn get_system_status(app_state: web::Data<Arc<AppState>>) -> impl Resp
 
     let uptime_display = format!("{}d {}h {}m", days, hours, minutes);
 
-    let ws_connections = app_state.ws_connection_count.load(Ordering::Relaxed);
+    // ⚠️ 读全局计数器,不读 AppState 的那个。
+    // AppState.ws_connection_count 在 HTTP App(8094)里,而 WS 会话跑在
+    // 独立的 WS App(8095)中,永远碰不到它 —— 那个字段恒为 0。
+    // @yutiansut @quantaxis
+    let ws_connections = crate::service::websocket::ws_connection_count();
+    let _ = app_state.ws_connection_count.load(Ordering::Relaxed); // 保留字段以免破坏既有结构
 
     let status = SystemStatus {
         start_time: start_time.format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string(),

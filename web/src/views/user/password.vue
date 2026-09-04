@@ -7,7 +7,7 @@
 
     <el-row :gutter="20">
       <!-- 修改交易密码 -->
-      <el-col :span="12">
+      <el-col :xs="24" :md="12">
         <el-card class="password-card">
           <div slot="header">
             <span>修改交易密码</span>
@@ -55,7 +55,7 @@
       </el-col>
 
       <!-- 修改资金密码 -->
-      <el-col :span="12">
+      <el-col :xs="24" :md="12">
         <el-card class="password-card">
           <div slot="header">
             <span>修改资金密码</span>
@@ -124,6 +124,7 @@
 /**
  * 密码管理页面 @yutiansut @quantaxis
  */
+import { mapGetters } from 'vuex'
 import { changePassword, getUserAccounts } from '@/api'
 
 export default {
@@ -170,6 +171,12 @@ export default {
     }
   },
 
+  computed: {
+    // 登录用户 ID 来自 vuex（store 持久化到 localStorage 'currentUser'）
+    // @yutiansut @quantaxis
+    ...mapGetters(['currentUser'])
+  },
+
   created() {
     this.loadAccounts()
   },
@@ -177,15 +184,14 @@ export default {
   methods: {
     async loadAccounts() {
       try {
-        const userId = localStorage.getItem('userId')
+        const userId = this.currentUser
         if (!userId) return
+        // request 拦截器已解包，后端返回 { accounts, total }
         const res = await getUserAccounts(userId)
-        if (res.success) {
-          this.accounts = res.data || []
-          if (this.accounts.length > 0) {
-            this.tradingPasswordForm.account_id = this.accounts[0].account_id
-            this.fundPasswordForm.account_id = this.accounts[0].account_id
-          }
+        this.accounts = (res && res.accounts) || []
+        if (this.accounts.length > 0) {
+          this.tradingPasswordForm.account_id = this.accounts[0].account_id
+          this.fundPasswordForm.account_id = this.accounts[0].account_id
         }
       } catch (err) {
         console.error('加载账户列表失败:', err)
@@ -202,17 +208,14 @@ export default {
             account_id: this.tradingPasswordForm.account_id,
             old_password: this.tradingPasswordForm.old_password,
             new_password: this.tradingPasswordForm.new_password,
-            password_type: 'Trading'
+            password_type: 'TRADING'
           }
-          const res = await changePassword(data)
-          if (res.success) {
-            this.$message.success('交易密码修改成功')
-            this.tradingPasswordForm.old_password = ''
-            this.tradingPasswordForm.new_password = ''
-            this.tradingPasswordForm.confirm_password = ''
-          } else {
-            this.$message.error(res.error || '修改失败')
-          }
+          // request 拦截器已解包：失败会 reject 到 catch 并已弹出后端错误信息
+          await changePassword(data)
+          this.$message.success('交易密码修改成功')
+          this.tradingPasswordForm.old_password = ''
+          this.tradingPasswordForm.new_password = ''
+          this.tradingPasswordForm.confirm_password = ''
         } catch (err) {
           console.error('修改交易密码失败:', err)
           this.$message.error('修改交易密码失败')
@@ -232,17 +235,14 @@ export default {
             account_id: this.fundPasswordForm.account_id,
             old_password: this.fundPasswordForm.old_password,
             new_password: this.fundPasswordForm.new_password,
-            password_type: 'Fund'
+            password_type: 'FUND'
           }
-          const res = await changePassword(data)
-          if (res.success) {
-            this.$message.success('资金密码修改成功')
-            this.fundPasswordForm.old_password = ''
-            this.fundPasswordForm.new_password = ''
-            this.fundPasswordForm.confirm_password = ''
-          } else {
-            this.$message.error(res.error || '修改失败')
-          }
+          // request 拦截器已解包：失败会 reject 到 catch 并已弹出后端错误信息
+          await changePassword(data)
+          this.$message.success('资金密码修改成功')
+          this.fundPasswordForm.old_password = ''
+          this.fundPasswordForm.new_password = ''
+          this.fundPasswordForm.confirm_password = ''
         } catch (err) {
           console.error('修改资金密码失败:', err)
           this.$message.error('修改资金密码失败')

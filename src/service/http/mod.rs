@@ -91,6 +91,10 @@ impl HttpServer {
                 // 应用状态
                 .app_data(web::Data::new(app_state.clone()))
                 .app_data(web::Data::new(market_service.clone()))
+                // account_admin 的 change_password / get_commission_statistics /
+                // get_margin_summary 直接提取 web::Data<Arc<AccountManager>>
+                // @yutiansut @quantaxis
+                .app_data(web::Data::new(app_state.account_mgr.clone()))
                 // 中间件
                 .wrap(middleware::Logger::default())
                 .wrap(middleware::Compress::default())
@@ -103,7 +107,13 @@ impl HttpServer {
                         .max_age(3600),
                 )
                 // 配置路由
-                .configure(routes::configure)
+                .configure({
+                    let require = std::env::var("QAEX_REQUIRE_ADMIN_AUTH")
+                        .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+                        .unwrap_or(false);
+                    let guard = auth::AdminAuth::new(app_state.user_mgr.clone(), require);
+                    move |cfg: &mut web::ServiceConfig| routes::configure(cfg, guard.clone())
+                })
         })
         .bind(&bind_address)?
         .run()

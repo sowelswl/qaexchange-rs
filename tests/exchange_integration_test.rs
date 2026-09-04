@@ -74,7 +74,7 @@ fn generate_order(instrument_id: &str, order_id: u64, timestamp: i64) -> WalReco
 
     WalRecord::OrderInsert {
         order_id,
-        user_id: [1u8; 32],
+        user_id: [1u8; 40],
         instrument_id: instrument_bytes,
         direction,
         offset,

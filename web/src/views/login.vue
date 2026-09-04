@@ -259,8 +259,8 @@ export default {
         const now = Date.now()
         // 过滤有效期内的公告
         const validAnnouncements = (res.announcements || []).filter(a => {
-          const from = a.effective_from ? a.effective_from * 1000 : 0
-          const until = a.effective_until ? a.effective_until * 1000 : Number.MAX_SAFE_INTEGER
+          const from = a.publish_time ? a.publish_time : 0
+          const until = a.expire_time ? a.expire_time : Number.MAX_SAFE_INTEGER
           return now >= from && now <= until
         })
         // 按优先级排序

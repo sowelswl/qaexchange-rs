@@ -33,21 +33,25 @@
         </el-form-item>
       </el-form>
 
+      <!-- ✨ 表格高度改为跟随视口, 不再写死 500px @yutiansut @quantaxis
+           实测 1366x768: 表格上沿距内容区顶部 171px
+           var(--qa-content-h) 由 layout/index.vue 统一定义 = 100vh - 56(顶栏) - 40(padding),
+           有公告条时自动再减 40px; max(260px, ...) 是极短视口下的兜底 -->
       <el-table
         :data="orderList"
         border
         stripe
-        height="500"
+        :height="'max(260px, calc(var(--qa-content-h, calc(100vh - 96px)) - 171px))'"
         v-loading="loading"
         style="width: 100%"
       >
-        <el-table-column prop="order_id" label="订单ID" width="200" />
-        <el-table-column prop="user_id" label="账户ID" width="150" show-overflow-tooltip>
+        <el-table-column prop="order_id" label="订单ID" min-width="200" show-overflow-tooltip/>
+        <el-table-column prop="user_id" label="账户ID" min-width="150" show-overflow-tooltip>
           <template slot-scope="scope">
             {{ getAccountName(scope.row.user_id) }}
           </template>
         </el-table-column>
-        <el-table-column prop="instrument_id" label="合约" width="100" />
+        <el-table-column prop="instrument_id" label="合约" min-width="100" show-overflow-tooltip/>
         <el-table-column prop="direction" label="方向" width="80" align="center">
           <template slot-scope="scope">
             <el-tag :type="scope.row.direction === 'BUY' ? 'danger' : 'success'" size="mini">
@@ -60,21 +64,25 @@
             {{ scope.row.offset === 'OPEN' ? '开仓' : '平仓' }}
           </template>
         </el-table-column>
-        <el-table-column prop="price" label="价格" width="100" align="right">
+        <el-table-column prop="price" label="价格" min-width="100" align="right">
           <template slot-scope="scope">
             {{ scope.row.price.toFixed(2) }}
           </template>
         </el-table-column>
         <el-table-column prop="volume" label="数量" width="80" align="right" />
         <el-table-column prop="filled_volume" label="成交量" width="80" align="right" />
-        <el-table-column prop="status" label="状态" width="100" align="center">
+        <el-table-column prop="status" label="状态" min-width="100" align="center">
           <template slot-scope="scope">
             <el-tag :type="getStatusType(scope.row.status)" size="mini">
               {{ getStatusText(scope.row.status) }}
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="created_at" label="创建时间" width="160" />
+        <!-- 后端 OrderInfo(models.rs:97) 只有 submit_time / update_time,
+             **没有 created_at** —— 原来绑 created_at,整列 7 行全空白。
+             submit_time 是纳秒(order_router.rs:734 timestamp_nanos_opt),
+             与 trades 页 trade.timestamp 同一约定。@yutiansut @quantaxis -->
+        <el-table-column prop="submit_time" label="创建时间" min-width="160" :formatter="formatSubmitTime" />
         <el-table-column label="操作" width="150" fixed="right">
           <template slot-scope="scope">
             <el-button
@@ -206,8 +214,9 @@ export default {
       }
     }
   },
-  mounted() {
-    this.loadAccounts()
+  async mounted() {
+    // 必须先拿到账户列表：订单只能按 account_id 查 @yutiansut @quantaxis
+    await this.loadAccounts()
     this.loadOrders()
   },
   methods: {
@@ -259,16 +268,39 @@ export default {
         return
       }
 
+      // ✨ 后端 /api/order/user/{id} 的索引键实际是 account_id
+      // （order_router.rs: user_orders.entry(req.account_id)），
+      // 传用户 UUID 恒返回空列表。这里遍历该用户的账户逐个查询后聚合，
+      // 与 views/trade/index.vue 的用法保持一致。@yutiansut @quantaxis
+      if (!this.accounts.length) {
+        await this.loadAccounts()
+      }
+
       this.loading = true
       try {
-        const data = await queryUserOrders(this.currentUser)
-        this.orderList = Array.isArray(data) ? data : (data.orders || [])
-        this.loading = false
+        const pages = await Promise.all(
+          this.accounts.map(acc =>
+            queryUserOrders(acc.account_id).catch(() => null)
+          )
+        )
+        this.orderList = pages.reduce((all, data) => {
+          if (!data) return all
+          return all.concat(Array.isArray(data) ? data : (data.orders || []))
+        }, [])
       } catch (error) {
         this.$message.error('加载订单失败: ' + ((error.response && error.response.data && error.response.data.error) || error.message))
         this.orderList = []
+      } finally {
         this.loading = false
       }
+    },
+
+    // 纳秒时间戳 → 本地时间串
+    formatSubmitTime(row, column, value) {
+      if (!value) return '—'
+      const ms = Number(value) / 1e6
+      if (!isFinite(ms) || ms <= 0) return '—'
+      return new Date(ms).toLocaleString('zh-CN')
     },
 
     handleQuery() {

@@ -18,7 +18,12 @@
           />
         </el-select>
 
-        <el-radio-group v-model="timeRange" size="small" @change="loadData">
+        <!-- ⚠️ 原来这里是 @change="loadData" —— methods 里根本没有 loadData,
+             Vue 渲染时报 `Property or method "loadData" is not defined`,
+             并把 change 处理器置为 undefined(`Invalid handler for event "change"`)。
+             而 watch.timeRange 已经调了 applyTimeFilter,本就不需要这个处理器。
+             @yutiansut @quantaxis -->
+        <el-radio-group v-model="timeRange" size="small">
           <el-radio-button label="today">今日</el-radio-button>
           <el-radio-button label="week">本周</el-radio-button>
           <el-radio-button label="month">本月</el-radio-button>
@@ -29,7 +34,7 @@
 
     <!-- 统计卡片 -->
     <el-row :gutter="20" class="stats-row">
-      <el-col :span="6">
+      <el-col :xs="24" :sm="12" :lg="6">
         <div class="stat-card">
           <div class="stat-label">累计收益</div>
           <div class="stat-value" :style="{ color: statistics.totalProfit >= 0 ? '#F56C6C' : '#67C23A' }">
@@ -41,7 +46,7 @@
         </div>
       </el-col>
 
-      <el-col :span="6">
+      <el-col :xs="24" :sm="12" :lg="6">
         <div class="stat-card">
           <div class="stat-label">最大回撤</div>
           <div class="stat-value" style="color: #67C23A">
@@ -53,7 +58,7 @@
         </div>
       </el-col>
 
-      <el-col :span="6">
+      <el-col :xs="24" :sm="12" :lg="6">
         <div class="stat-card">
           <div class="stat-label">盈利天数 / 亏损天数</div>
           <div class="stat-value">
@@ -67,7 +72,7 @@
         </div>
       </el-col>
 
-      <el-col :span="6">
+      <el-col :xs="24" :sm="12" :lg="6">
         <div class="stat-card">
           <div class="stat-label">平均日收益</div>
           <div class="stat-value" :style="{ color: statistics.avgDailyProfit >= 0 ? '#F56C6C' : '#67C23A' }">
@@ -104,38 +109,38 @@
         stripe
         height="300"
       >
-        <el-table-column prop="date" label="日期" width="120"></el-table-column>
-        <el-table-column prop="balance" label="权益" width="130" align="right">
+        <el-table-column prop="date" label="日期" min-width="120"></el-table-column>
+        <el-table-column prop="balance" label="权益" min-width="130" align="right">
           <template slot-scope="scope">
             {{ scope.row.balance.toLocaleString('zh-CN', { minimumFractionDigits: 2 }) }}
           </template>
         </el-table-column>
-        <el-table-column prop="available" label="可用资金" width="130" align="right">
+        <el-table-column prop="available" label="可用资金" min-width="130" align="right">
           <template slot-scope="scope">
             {{ scope.row.available.toLocaleString('zh-CN', { minimumFractionDigits: 2 }) }}
           </template>
         </el-table-column>
-        <el-table-column prop="margin" label="保证金" width="130" align="right">
+        <el-table-column prop="margin" label="保证金" min-width="130" align="right">
           <template slot-scope="scope">
             {{ scope.row.margin.toLocaleString('zh-CN', { minimumFractionDigits: 2 }) }}
           </template>
         </el-table-column>
-        <el-table-column prop="daily_profit" label="日盈亏" width="130" align="right">
+        <el-table-column prop="daily_profit" label="日盈亏" min-width="130" align="right">
           <template slot-scope="scope">
             <span :style="{ color: scope.row.daily_profit >= 0 ? '#F56C6C' : '#67C23A' }">
               {{ scope.row.daily_profit >= 0 ? '+' : '' }}{{ scope.row.daily_profit.toLocaleString('zh-CN', { minimumFractionDigits: 2 }) }}
             </span>
           </template>
         </el-table-column>
-        <el-table-column prop="daily_profit_rate" label="日收益率" width="120" align="right">
+        <el-table-column prop="daily_profit_rate" label="日收益率" min-width="120" align="right">
           <template slot-scope="scope">
             <span :style="{ color: scope.row.daily_profit_rate >= 0 ? '#F56C6C' : '#67C23A' }">
               {{ scope.row.daily_profit_rate >= 0 ? '+' : '' }}{{ (scope.row.daily_profit_rate * 100).toFixed(2) }}%
             </span>
           </template>
         </el-table-column>
-        <el-table-column prop="trade_count" label="交易笔数" width="100" align="center"></el-table-column>
-        <el-table-column prop="commission" label="手续费" width="120" align="right">
+        <el-table-column prop="trade_count" label="交易笔数" min-width="100" align="center"></el-table-column>
+        <el-table-column prop="commission" label="手续费" min-width="120" align="right">
           <template slot-scope="scope">
             {{ scope.row.commission.toLocaleString('zh-CN', { minimumFractionDigits: 2 }) }}
           </template>
@@ -173,6 +178,7 @@ export default {
         sharpeRatio: 0
       },
       chart: null,
+      resizeRaf: null,   // ✨ resize 合并帧句柄 @yutiansut @quantaxis
       loading: false
     }
   },
@@ -193,13 +199,29 @@ export default {
   mounted() {
     this.initChart()
     this.initialize()
+    // ✨ 资金曲线图此前没有 resize 处理, 视口变化后 canvas 尺寸不更新 @yutiansut @quantaxis
+    window.addEventListener('resize', this.onWindowResize)
   },
   beforeDestroy() {
+    window.removeEventListener('resize', this.onWindowResize)
+    if (this.resizeRaf) {
+      window.cancelAnimationFrame(this.resizeRaf)
+      this.resizeRaf = null
+    }
     if (this.chart) {
       this.chart.dispose()
     }
   },
   methods: {
+    // ✨ 用 rAF 合并 resize 回调 @yutiansut @quantaxis
+    onWindowResize() {
+      if (this.resizeRaf) return
+      this.resizeRaf = window.requestAnimationFrame(() => {
+        this.resizeRaf = null
+        if (this.chart) this.chart.resize()
+      })
+    },
+
     async initialize() {
       if (!this.currentUser) {
         this.$message.error('请先登录')

@@ -558,9 +558,30 @@ pub async fn get_trade_statistics(
             total_turnover += trade.volume * trade.price;
             total_commission += trade.commission;
 
-            // 计算盈亏（简化：假设平仓交易）
-            // 实际应该根据 offset 判断开平仓并计算真实盈亏
-            let pnl = 0.0; // 需要关联持仓计算
+            // ⚠️ 逐笔盈亏未实现 —— 下面六个字段恒为 0,不是「全亏」@yutiansut @quantaxis
+            //
+            // 受影响字段:win_count / loss_count / win_rate /
+            //           avg_profit / max_profit / max_loss
+            // 实测:/api/data/statistics/trades 返回
+            //   win_count=0 loss_count=0 win_rate=0.0 avg_profit=0.0
+            // 前端目前**一处都没消费**这六个字段(grep 全前端零命中),
+            // 所以暂不改成 Option;但任何新接入方都会把 0.0 误读成「胜率 0%」。
+            //
+            // 为什么算不出来:QIFI 的 Trade 结构
+            // (qars2/src/qaprotocol/qifi/account.rs:254-267)只有
+            //   direction / offset / volume / price / commission
+            // **没有开仓成本**。算一笔平仓盈亏需要当时的持仓价,
+            // 而那是账户级加权均价、会随后续开仓变化 ——
+            // 用当前 position_price 回算得到的不是当时的盈亏。
+            //
+            // 三条路都不该在 HTTP 查询层做:
+            //   ① 用当前 position_price 回算  → 均价已变,结果错
+            //   ② 逐笔重放 dailytrades 重建持仓 → 要复现今昨仓与平今/平昨规则
+            //   ③ 用账户级 close_profit      → 正确但是汇总值,拆不到笔
+            // 正解:由账户层在成交时产出逐笔平仓盈亏
+            // (参见 qaultraoms 的净额数学契约:平仓盈亏对**持仓价**而非开仓价),
+            // 查询层只做聚合。
+            let pnl = 0.0; // TODO: 由账户层提供逐笔平仓盈亏后接入
 
             if pnl > 0.0 {
                 win_count += 1;

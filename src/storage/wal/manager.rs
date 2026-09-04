@@ -602,15 +602,37 @@ impl WalManager {
     }
 
     /// Checkpoint：截断旧 WAL 文件
+    ///
+    /// ⚠️ 判据是「该文件**所有**记录的 sequence 都 < checkpoint」，
+    /// 不是「该文件的**起始** sequence < checkpoint」。@yutiansut @quantaxis
+    ///
+    /// 原实现用 `header.start_sequence < checkpoint_seq` 判定，而
+    /// `OltpHybridStorage::create_checkpoint`（hybrid/oltp.rs:548,599）传进来的是
+    /// `get_current_sequence()` —— **当前正在写入的那个段，start_sequence 必然
+    /// 小于当前序列号**，于是会被 `remove_file` 删掉。Linux 上 fd 仍然有效，
+    /// 后续 append 全部写进一个已 unlink 的 inode，静默丢数据。
+    /// 同文件的单测（`test_wal_checkpoint`）当时把这个行为断言成了正确的。
+    ///
+    /// WAL 文件头里没有 end_sequence（`WalFileHeader` 只有 start_sequence），
+    /// 所以用「下一个文件的 start_sequence」界定右端：
+    /// files[i] 覆盖 `[start_i, start_{i+1} - 1]`，
+    /// 仅当 `start_{i+1} <= checkpoint` 时整段才都在 checkpoint 之前。
+    /// 最后一个文件（当前正在写的）没有后继，因此**永远不会被删除**。
     pub fn checkpoint(&self, sequence: u64) -> Result<(), String> {
-        let files = self.list_wal_files()?;
+        let files = self.list_wal_files()?; // 已按文件名排序
 
-        for file_path in files {
-            if self.should_truncate(&file_path, sequence)? {
-                std::fs::remove_file(&file_path)
+        for i in 0..files.len().saturating_sub(1) {
+            let next_start = Self::read_start_sequence(&files[i + 1])?;
+            if next_start <= sequence {
+                std::fs::remove_file(&files[i])
                     .map_err(|e| format!("Truncate WAL failed: {}", e))?;
 
-                log::info!("Removed old WAL: {}", file_path);
+                log::info!(
+                    "Removed old WAL: {} (covers [.., {}), checkpoint={})",
+                    files[i],
+                    next_start,
+                    sequence
+                );
             }
         }
 
@@ -663,18 +685,15 @@ impl WalManager {
         Ok(files)
     }
 
-    fn should_truncate(&self, file_path: &str, checkpoint_seq: u64) -> Result<bool, String> {
-        // 打开文件读取 header
+    /// 读取某个 WAL 文件头里的 start_sequence @yutiansut @quantaxis
+    fn read_start_sequence(file_path: &str) -> Result<u64, String> {
         let mut file = File::open(file_path)
             .map_err(|e| format!("Open file for truncate check failed: {}", e))?;
         let mut header_buf = vec![0u8; 128];
         file.read_exact(&mut header_buf)
             .map_err(|e| format!("Read header for truncate check failed: {}", e))?;
 
-        let header = WalFileHeader::from_bytes(&header_buf)?;
-
-        // 如果文件的起始序列号小于 checkpoint，则可以删除
-        Ok(header.start_sequence < checkpoint_seq)
+        Ok(WalFileHeader::from_bytes(&header_buf)?.start_sequence)
     }
 }
 
@@ -699,7 +718,7 @@ mod tests {
 
         let record = WalRecord::OrderInsert {
             order_id: 1,
-            user_id: [2u8; 32],
+            user_id: [2u8; 40],
             instrument_id: [3u8; 16],
             direction: 0,
             offset: 0,
@@ -744,7 +763,7 @@ mod tests {
         for i in 0..10 {
             let record = WalRecord::OrderInsert {
                 order_id: i as u64,
-                user_id: [0u8; 32],
+                user_id: [0u8; 40],
                 instrument_id: [0u8; 16],
                 direction: 0,
                 offset: 0,
@@ -786,15 +805,21 @@ mod tests {
         let files_before = wal.list_wal_files().unwrap();
         assert_eq!(files_before.len(), 1);
 
-        // Checkpoint 到 sequence 0（不应该删除任何文件，因为 start_sequence=1 >= 0 是 false）
+        // Checkpoint 到 sequence 0：不删任何文件
         wal.checkpoint(0).unwrap();
         let files_after = wal.list_wal_files().unwrap();
         assert_eq!(files_after.len(), 1);
 
-        // Checkpoint 到 sequence 2（start_sequence=1 < 2，文件应该被删除）
+        // ✨ Checkpoint 到 sequence 2：**仍然不能删**。@yutiansut @quantaxis
+        // 这是唯一的文件,也就是当前正在写入的段,它的右端是开放的 ——
+        // 无法证明它里面没有 sequence >= 2 的记录(事实上就有)。
+        // 旧版本这里断言 len()==0,把「删掉正在写的段」当成了正确行为。
         wal.checkpoint(2).unwrap();
-        let files_deleted = wal.list_wal_files().unwrap();
-        assert_eq!(files_deleted.len(), 0);
+        assert_eq!(
+            wal.list_wal_files().unwrap().len(),
+            1,
+            "当前正在写入的 WAL 段永远不能被 checkpoint 删除"
+        );
     }
 
     #[test]
@@ -810,7 +835,7 @@ mod tests {
         for i in 0..1000 {
             let record = WalRecord::OrderInsert {
                 order_id: i as u64,
-                user_id: [(i >> 8) as u8; 32],
+                user_id: [(i >> 8) as u8; 40],
                 instrument_id: [(i >> 16) as u8; 16],
                 direction: (i % 2) as u8,
                 offset: 0,

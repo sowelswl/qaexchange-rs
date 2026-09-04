@@ -26,24 +26,24 @@
           <button
             type="button"
             class="condition-btn"
-            :class="{ active: form.condition_type === 'StopLoss' }"
-            @click="form.condition_type = 'StopLoss'"
+            :class="{ active: form.condition_type === 'STOP_LOSS' }"
+            @click="form.condition_type = 'STOP_LOSS'"
           >
             止损单
           </button>
           <button
             type="button"
             class="condition-btn"
-            :class="{ active: form.condition_type === 'TakeProfit' }"
-            @click="form.condition_type = 'TakeProfit'"
+            :class="{ active: form.condition_type === 'TAKE_PROFIT' }"
+            @click="form.condition_type = 'TAKE_PROFIT'"
           >
             止盈单
           </button>
           <button
             type="button"
             class="condition-btn"
-            :class="{ active: form.condition_type === 'PriceTouch' }"
-            @click="form.condition_type = 'PriceTouch'"
+            :class="{ active: form.condition_type === 'PRICE_TOUCH' }"
+            @click="form.condition_type = 'PRICE_TOUCH'"
           >
             触价单
           </button>
@@ -55,8 +55,8 @@
         <div class="form-group">
           <label for="triggerCondition">触发条件：</label>
           <select id="triggerCondition" v-model="form.trigger_condition" required>
-            <option value="GreaterOrEqual">价格 >= 触发价</option>
-            <option value="LessOrEqual">价格 &lt;= 触发价</option>
+            <option value="GE">价格 >= 触发价</option>
+            <option value="LE">价格 &lt;= 触发价</option>
           </select>
         </div>
         <div class="form-group">
@@ -179,7 +179,7 @@
             <td>{{ order.instrument_id }}</td>
             <td>{{ formatConditionType(order.condition_type) }}</td>
             <td>
-              {{ order.trigger_condition === 'GreaterOrEqual' ? '>=' : '<=' }}
+              {{ order.trigger_condition === 'GE' ? '>=' : '<=' }}
               {{ order.trigger_price }}
             </td>
             <td :class="order.direction === 'BUY' ? 'direction-buy' : 'direction-sell'">
@@ -191,7 +191,7 @@
             </td>
             <td>
               <button
-                v-if="order.status === 'Pending'"
+                v-if="order.status === 'PENDING'"
                 class="btn-cancel"
                 @click="handleCancelOrder(order.conditional_order_id)"
               >
@@ -231,9 +231,9 @@ export default {
         volume: 1,
         order_type: 'MARKET',
         limit_price: null,
-        condition_type: 'StopLoss',
+        condition_type: 'STOP_LOSS',
         trigger_price: null,
-        trigger_condition: 'LessOrEqual'
+        trigger_condition: 'LE'
       },
       validUntilInput: '',
       conditionalOrders: [],
@@ -281,14 +281,14 @@ export default {
     // 自动设置默认触发条件
     'form.condition_type': {
       handler(newVal) {
-        if (newVal === 'StopLoss') {
+        if (newVal === 'STOP_LOSS') {
           // 止损默认: 价格跌破触发价
-          this.form.trigger_condition = 'LessOrEqual'
+          this.form.trigger_condition = 'LE'
           this.form.direction = 'SELL'
           this.form.offset = 'CLOSE'
-        } else if (newVal === 'TakeProfit') {
+        } else if (newVal === 'TAKE_PROFIT') {
           // 止盈默认: 价格涨到触发价
-          this.form.trigger_condition = 'GreaterOrEqual'
+          this.form.trigger_condition = 'GE'
           this.form.direction = 'SELL'
           this.form.offset = 'CLOSE'
         }
@@ -310,10 +310,9 @@ export default {
       if (!this.currentAccountId) return
       try {
         this.loading = true
+        // request 拦截器已解包，后端返回 { orders, total }
         const res = await getConditionalOrders(this.currentAccountId)
-        if (res.data && res.data.success) {
-          this.conditionalOrders = res.data.data || []
-        }
+        this.conditionalOrders = (res && res.orders) || []
       } catch (error) {
         console.error('[ConditionalOrderForm] Failed to load orders:', error)
       } finally {
@@ -359,18 +358,15 @@ export default {
           data.valid_until = new Date(this.validUntilInput).getTime()
         }
 
+        // request 拦截器已解包：失败会 reject 到 catch
         const res = await createConditionalOrder(data)
 
-        if (res.data && res.data.success) {
-          this.successMessage = `条件单创建成功！单号: ${res.data.data.conditional_order_id}`
-          await this.loadConditionalOrders()
+        this.successMessage = `条件单创建成功！单号: ${res.conditional_order_id}`
+        await this.loadConditionalOrders()
 
-          // 重置触发价格
-          this.form.trigger_price = null
-          this.validUntilInput = ''
-        } else {
-          this.errorMessage = (res.data && res.data.error) || '创建失败'
-        }
+        // 重置触发价格
+        this.form.trigger_price = null
+        this.validUntilInput = ''
       } catch (error) {
         console.error('[ConditionalOrderForm] Create failed:', error)
         this.errorMessage = `创建失败: ${error.message || '未知错误'}`
@@ -383,13 +379,10 @@ export default {
       if (!confirm('确定要撤销此条件单吗？')) return
 
       try {
-        const res = await cancelConditionalOrder(orderId)
-        if (res.data && res.data.success) {
-          this.successMessage = '条件单已撤销'
-          await this.loadConditionalOrders()
-        } else {
-          this.errorMessage = (res.data && res.data.error) || '撤销失败'
-        }
+        // request 拦截器已解包：失败会 reject 到 catch
+        await cancelConditionalOrder(orderId)
+        this.successMessage = '条件单已撤销'
+        await this.loadConditionalOrders()
       } catch (error) {
         console.error('[ConditionalOrderForm] Cancel failed:', error)
         this.errorMessage = `撤销失败: ${error.message || '未知错误'}`
@@ -398,31 +391,31 @@ export default {
 
     formatConditionType(type) {
       const map = {
-        'StopLoss': '止损',
-        'TakeProfit': '止盈',
-        'PriceTouch': '触价'
+        'STOP_LOSS': '止损',
+        'TAKE_PROFIT': '止盈',
+        'PRICE_TOUCH': '触价'
       }
       return map[type] || type
     },
 
     formatStatus(status) {
       const map = {
-        'Pending': '等待触发',
-        'Triggered': '已触发',
-        'Cancelled': '已撤销',
-        'Expired': '已过期',
-        'Failed': '执行失败'
+        'PENDING': '等待触发',
+        'TRIGGERED': '已触发',
+        'CANCELLED': '已撤销',
+        'EXPIRED': '已过期',
+        'FAILED': '执行失败'
       }
       return map[status] || status
     },
 
     getStatusClass(status) {
       const map = {
-        'Pending': 'status-pending',
-        'Triggered': 'status-triggered',
-        'Cancelled': 'status-cancelled',
-        'Expired': 'status-expired',
-        'Failed': 'status-failed'
+        'PENDING': 'status-pending',
+        'TRIGGERED': 'status-triggered',
+        'CANCELLED': 'status-cancelled',
+        'EXPIRED': 'status-expired',
+        'FAILED': 'status-failed'
       }
       return map[status] || ''
     }

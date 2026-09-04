@@ -13,7 +13,10 @@ use super::transfer;  // 银期转账 @yutiansut @quantaxis
 use actix_web::web;
 
 /// 配置所有路由
-pub fn configure(cfg: &mut web::ServiceConfig) {
+///
+/// `admin_auth` 会 wrap 到 /api/admin、/api/management、/api/account-admin 三个 scope 上。
+/// 未启用时中间件直接放行,行为与加它之前完全一致。@yutiansut @quantaxis
+pub fn configure(cfg: &mut web::ServiceConfig, admin_auth: auth::AdminAuth) {
     cfg
         // 健康检查
         .route("/health", web::get().to(handlers::health_check))
@@ -145,6 +148,7 @@ pub fn configure(cfg: &mut web::ServiceConfig) {
         // 管理端路由 - 合约管理和结算管理
         .service(
             web::scope("/api/admin")
+                .wrap(admin_auth.clone())
                 // 合约管理
                 .route("/instruments", web::get().to(admin::get_all_instruments))
                 .route(
@@ -192,6 +196,7 @@ pub fn configure(cfg: &mut web::ServiceConfig) {
         // 管理端路由 - 账户管理、资金管理、风控监控
         .service(
             web::scope("/api/management")
+                .wrap(admin_auth.clone())
                 // 账户管理
                 .route("/accounts", web::get().to(management::list_all_accounts))
                 .route(
@@ -232,6 +237,7 @@ pub fn configure(cfg: &mut web::ServiceConfig) {
         // @yutiansut @quantaxis
         .service(
             web::scope("/api/account-admin")
+                .wrap(admin_auth.clone())
                 // Phase 12: 密码管理
                 .route("/password/change", web::post().to(account_admin::change_password))
                 .route("/password/reset", web::post().to(account_admin::reset_password))

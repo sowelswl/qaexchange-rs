@@ -2,10 +2,10 @@
   <div class="chart-page">
     <el-card class="header-card">
       <el-row :gutter="20" align="middle">
-        <el-col :span="8">
+        <el-col :xs="24" :lg="8">
           <h2>K线图表</h2>
         </el-col>
-        <el-col :span="16">
+        <el-col :xs="24" :lg="16">
           <div class="controls">
             <el-select
               v-model="selectedInstrument"
@@ -61,12 +61,20 @@
     </el-card>
 
     <el-card class="chart-card" :body-style="{ height: '100%', padding: '10px' }">
-      <div class="chart-container" style="height: calc(100vh - 250px); min-height: 500px;">
+      <!-- ✨ 去掉行内 height:calc(100vh - 250px) 与 min-height:500px @yutiansut @quantaxis
+           这两个值与 .chart-page(100vh-100px)、.chart-card(100vh-220px) 三条高度链
+           互不相加, 实测 1366x600: .chart-card 只有 368px 且 overflow:hidden,
+           而 .chart-container 被 min-height:500px 撑到 500px ->
+           198px 被卡片裁掉且无滚动条, canvas 底边还落在视口外 99px。
+           改为纯 flex 填充: 父级给多少就占多少, 不再有魔数。 -->
+      <div class="chart-container">
         <KLineChart
           ref="klineChart"
           :symbol="selectedInstrument"
           :period="klinePeriod"
           :kline-data="klineDataList"
+          :loaded="historyLoaded"
+          :load-error="historyError"
         />
       </div>
     </el-card>
@@ -76,6 +84,7 @@
 <script>
 import { mapGetters, mapActions } from 'vuex'
 import KLineChart from '@/components/KLineChart.vue'
+import { getKlineData } from '@/api'
 
 export default {
   name: 'ChartPage',
@@ -91,6 +100,8 @@ export default {
       selectedInstrument: 'IF2501',
       klinePeriod: 5,  // 默认5分钟
       klineDataList: [],
+      historyLoaded: false,   // HTTP 历史是否已回来
+      historyError: '',       // 历史加载失败原因(供页面提示)
 
       // 可用合约列表（与后端 instrument_id 一致，不带交易所前缀）
       availableInstruments: [
@@ -114,6 +125,7 @@ export default {
     selectedInstrument(newVal, oldVal) {
       if (newVal && newVal !== oldVal) {
         this.klineDataList = []
+        this.loadHistory()                    // 先走 HTTP,不等 WS
         if (this.isConnected) this.subscribeKLine()
       }
     },
@@ -155,8 +167,15 @@ export default {
           }
         })
 
-        klineArray.sort((a, b) => a.datetime - b.datetime)
-        this.klineDataList = klineArray
+        // ⚠️ 这里**不能**直接 `this.klineDataList = klineArray`。
+        // HTTP 历史(loadHistory)已经放了最多 500 根,而 WS 推的往往只是
+        // 最近几根 + 正在形成的那根 —— 整体替换会把历史抹掉,图表跳成几根。
+        // 按 datetime 合并,WS 的同一时刻数据覆盖历史(它更新)。
+        // @yutiansut @quantaxis
+        const merged = new Map()
+        for (const b of this.klineDataList) merged.set(b.datetime, b)
+        for (const b of klineArray) merged.set(b.datetime, b)
+        this.klineDataList = [...merged.values()].sort((a, b) => a.datetime - b.datetime)
       },
       deep: true
     },
@@ -165,12 +184,19 @@ export default {
     klinePeriod(newVal, oldVal) {
       if (newVal !== oldVal) {
         this.klineDataList = []
+        this.loadHistory()                    // 先走 HTTP,不等 WS
         if (this.selectedInstrument && this.isConnected) this.subscribeKLine()
       }
     }
   },
 
   mounted() {
+    // 先用 HTTP 把历史 K 线拉回来 —— 不依赖 WebSocket。
+    // 改之前本页**只**监听 DIFF 的 snapshot.klines,WS 没推就永远停在
+    // 「加载中」转圈。后端 /api/market/kline/{id} 一直是好的,
+    // 前端 getKlineData() 也一直在,只是两头从没接上。@yutiansut @quantaxis
+    this.loadHistory()
+
     // 自动连接 WebSocket（如果未连接）
     if (!this.isConnected) {
       this.connect()
@@ -197,6 +223,30 @@ export default {
         this.subscribeKLine()
       } catch (error) {
         this.$message.error('WebSocket 连接失败: ' + error.message)
+      }
+    },
+
+    // 拉 HTTP 历史 K 线(与 WS 增量互补)
+    // 后端参数:period 是**整数**(见 api/index.js 的说明),count 不是 limit。
+    async loadHistory() {
+      if (!this.selectedInstrument) return
+      this.historyError = ''
+      const inst = this.selectedInstrument
+      const per = this.klinePeriod
+      try {
+        const res = await getKlineData(inst, { period: per, count: 500 })
+        // 本接口不走 {success,data,error} 信封,拦截器不拆包
+        const bars = (res && res.data && res.data.klines) || []
+        // 请求期间用户可能已切合约/切周期,结果作废
+        if (inst !== this.selectedInstrument || per !== this.klinePeriod) return
+        const merged = new Map()
+        for (const b of bars) merged.set(b.datetime, b)
+        for (const b of this.klineDataList) merged.set(b.datetime, b)  // WS 已到的更新
+        this.klineDataList = [...merged.values()].sort((a, b) => a.datetime - b.datetime)
+        this.historyLoaded = true
+      } catch (e) {
+        this.historyError = (e && e.message) || String(e)
+        this.historyLoaded = true    // 别再转圈,让页面说清楚失败了
       }
     },
 
@@ -243,12 +293,20 @@ $dark-text-primary: #f0f6fc;
 $dark-text-secondary: #8b949e;
 
 .chart-page {
-  padding: 20px;
-  height: calc(100vh - 100px);
+  // ✨ 高度不再自己猜 @yutiansut @quantaxis
+  // 原来是 calc(100vh - 100px), 而真实的 chrome 是 96px(顶栏 56 + content-wrapper
+  // 上下 padding 各 20), 有公告条时是 136px —— 100px 三种情况都不对。
+  // .content-wrapper 经 01-layout-scroll.patch 后已是确定高度的 flex 子项,
+  // 这里直接 height:100% 即可, 公告条出现/消失都自动跟随。
+  padding: 0;   // ✨ content-wrapper 已有 20px padding, 这里再加就是双重内边距
+                //    (与 orders/trades/positions 等页的 padding:0 保持一致)
+  height: 100%;
+  min-height: 320px;   // 极短视口下的兜底
   display: flex;
   flex-direction: column;
 
   .header-card {
+    flex-shrink: 0;      // ✨ 工具条高度固定, 剩余空间全给图表
     margin-bottom: 20px;
     background-color: $dark-bg-secondary;
     border-color: $dark-border;
@@ -262,6 +320,8 @@ $dark-text-secondary: #8b949e;
       display: flex;
       align-items: center;
       justify-content: flex-end;
+      flex-wrap: wrap;     // ✨ 工具条里有 200px + 120px 两个定宽 select 加 tag/button,
+      gap: 8px 0;          //    最小宽度约 600px。窄屏必须换行, 否则被挤出可视区。
 
       .info-text {
         font-size: 14px;
@@ -271,17 +331,47 @@ $dark-text-secondary: #8b949e;
   }
 
   .chart-card {
-    // ✨ 修复: 使用显式高度而非 flex (flex 在某些情况下会计算为 0) @yutiansut @quantaxis
-    height: calc(100vh - 220px); // 页面高度 - padding - header
+    // ✨ 由固定 calc(100vh - 220px) 改回 flex 填充 @yutiansut @quantaxis
+    // 当年注释说「flex 在某些情况下会计算为 0」, 真正原因是 flex 子项默认
+    // min-height:auto + 祖先没有确定高度, 而不是 flex 本身不可用。
+    // 现在 .chart-page 有确定高度(100%), 再补上 min-height:0, flex 就可靠了。
+    flex: 1;
+    min-height: 0;
     display: flex;
     flex-direction: column;
     background-color: $dark-bg-secondary;
     border-color: $dark-border;
 
+    // el-card 的 body 是 .chart-container 的直接父级, 必须一起进 flex 链,
+    // 否则 body 高度塌成 auto, 子元素的 flex:1 无从计算。
+    ::v-deep .el-card__body {
+      flex: 1;
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+    }
+
     .chart-container {
       flex: 1;
-      min-height: 500px;
+      min-height: 0;       // ✨ 原来是 min-height:500px, 正是被卡片裁掉的元凶
       background-color: $dark-bg-primary;
+    }
+  }
+}
+
+// ✨ 响应式: 该页原来一个 @media 都没有 @yutiansut @quantaxis
+@media (max-width: 1199px) {
+  .chart-page .header-card .controls {
+    justify-content: flex-start;
+  }
+}
+
+@media (max-width: 767px) {
+  .chart-page {
+    min-height: 260px;
+
+    .header-card {
+      margin-bottom: 12px;
     }
   }
 }

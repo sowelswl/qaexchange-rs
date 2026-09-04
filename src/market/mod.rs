@@ -717,21 +717,24 @@ impl MarketDataService {
 
     /// 处理Tick数据并更新K线（成交时调用）
     /// @yutiansut @quantaxis
-    pub fn on_trade(&self, instrument_id: &str, price: f64, volume: i64) {
+    /// ✨ `direction` 是主动方方向("buy"/"sell") @yutiansut @quantaxis
+    ///
+    /// 本函数是**行情摄入的唯一入口** —— Tick 广播只从这里发出。
+    /// order_router 此前也直接 broadcast_tick(`:1144`/`:1257`),与这里构成
+    /// 完全相同的事件(broadcaster.rs:693 是同一个 MarketDataEvent::Tick),
+    /// 两条并存导致每笔成交重复计入 K线 volume。
+    /// 现改为:order_router 不再广播,由本函数统一发出并带真实 direction
+    /// (原来这里填空串)。单测 data_production_tests::test_matching_to_broadcast_flow
+    /// 直接调本函数并断言收到 Tick —— 该契约必须保留。
+    pub fn on_trade(&self, instrument_id: &str, price: f64, volume: i64, direction: &str) {
         let timestamp_ms = chrono::Utc::now().timestamp_millis();
 
-        // ✨ Phase 10: 广播 Tick 事件给 KLineActor
-        // KLineActor 订阅了这个事件来聚合 K 线数据
         if let Some(broadcaster) = &self.market_broadcaster {
-            log::debug!(
-                "📊 [MarketData] Broadcasting tick: {} price={:.2} vol={}",
-                instrument_id, price, volume
-            );
             broadcaster.broadcast(MarketDataEvent::Tick {
                 instrument_id: instrument_id.to_string(),
                 price,
                 volume: volume as f64,
-                direction: "".to_string(),
+                direction: direction.to_string(),
                 timestamp: timestamp_ms,
             });
         }

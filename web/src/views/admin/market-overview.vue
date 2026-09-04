@@ -2,7 +2,7 @@
   <div class="market-overview">
     <el-row :gutter="20" style="margin-bottom: 20px;">
       <!-- 统计卡片 -->
-      <el-col :span="6">
+      <el-col :xs="24" :sm="12" :lg="12" :xl="6">
         <el-card shadow="hover">
           <div class="stat-card">
             <i class="el-icon-user" style="color: #409EFF;"></i>
@@ -13,18 +13,31 @@
           </div>
         </el-card>
       </el-col>
-      <el-col :span="6">
+      <el-col :xs="24" :sm="12" :lg="12" :xl="6">
         <el-card shadow="hover">
           <div class="stat-card">
             <i class="el-icon-document" style="color: #E6A23C;"></i>
             <div class="stat-content">
-              <div class="stat-label">活跃订单</div>
+              <!-- ⚠️ 口径:本数字来自 /api/management/orders,读的是 order_router
+                   的**内存注册表** —— 重启时只恢复 SUBMITTED/ALIVE 的单
+                   (order_router.rs:2342),已撤/已成交的历史单不在其中。
+                   监控页的「总订单数」读 QIFI dailyorders(全部历史),
+                   两者可以相差数倍,都不是错的。@yutiansut @quantaxis -->
+              <div class="stat-label">
+                活跃订单
+                <el-tooltip
+                  content="当前在册订单（含挂单与本次运行产生的单）。历史累计请看「系统监控」页"
+                  placement="top"
+                >
+                  <i class="el-icon-question" style="color:#909399;font-size:12px;cursor:help;"></i>
+                </el-tooltip>
+              </div>
               <div class="stat-value">{{ totalOrders }}</div>
             </div>
           </div>
         </el-card>
       </el-col>
-      <el-col :span="6">
+      <el-col :xs="24" :sm="12" :lg="12" :xl="6">
         <el-card shadow="hover">
           <div class="stat-card">
             <i class="el-icon-money" style="color: #67C23A;"></i>
@@ -35,7 +48,7 @@
           </div>
         </el-card>
       </el-col>
-      <el-col :span="6">
+      <el-col :xs="24" :sm="12" :lg="12" :xl="6">
         <el-card shadow="hover">
           <div class="stat-card">
             <i class="el-icon-warning" style="color: #F56C6C;"></i>
@@ -67,32 +80,36 @@
           </el-input>
         </div>
 
+        <!-- ✨ 表格高度改为跟随视口, 不再写死 600px @yutiansut @quantaxis
+             实测 1366x768: 上方 233px; 原 600px 令表格底部溢出 141px
+             var(--qa-content-h) 由 layout/index.vue 统一定义 = 100vh - 56(顶栏) - 40(padding),
+             有公告条时自动再减 40px; max(260px, ...) 是极短视口下的兜底 -->
         <el-table
           :data="filteredAccounts"
           border
           stripe
-          height="600"
+          :height="'max(260px, calc(var(--qa-content-h, calc(100vh - 96px)) - 233px))'"
           v-loading="accountsLoading"
           :default-sort="{prop: 'risk_ratio', order: 'descending'}"
         >
-          <el-table-column prop="user_id" label="账户ID" width="280" show-overflow-tooltip />
-          <el-table-column prop="user_name" label="账户名称" width="180" />
-          <el-table-column prop="balance" label="余额" width="140" align="right" sortable>
+          <el-table-column prop="user_id" label="账户ID" min-width="280" show-overflow-tooltip />
+          <el-table-column prop="user_name" label="账户名称" min-width="180" />
+          <el-table-column prop="balance" label="余额" min-width="140" align="right" sortable>
             <template slot-scope="scope">
               {{ formatNumber(scope.row.balance) }}
             </template>
           </el-table-column>
-          <el-table-column prop="available" label="可用资金" width="140" align="right" sortable>
+          <el-table-column prop="available" label="可用资金" min-width="140" align="right" sortable>
             <template slot-scope="scope">
               {{ formatNumber(scope.row.available) }}
             </template>
           </el-table-column>
-          <el-table-column prop="margin_used" label="占用保证金" width="140" align="right" sortable>
+          <el-table-column prop="margin_used" label="占用保证金" min-width="140" align="right" sortable>
             <template slot-scope="scope">
               {{ formatNumber(scope.row.margin_used) }}
             </template>
           </el-table-column>
-          <el-table-column prop="risk_ratio" label="风险率" width="120" align="center" sortable>
+          <el-table-column prop="risk_ratio" label="风险率" min-width="70" align="center" sortable>
             <template slot-scope="scope">
               <el-tag :type="getRiskType(scope.row.risk_ratio)" size="small">
                 {{ (scope.row.risk_ratio * 100).toFixed(2) }}%
@@ -154,20 +171,24 @@
           </el-input>
         </div>
 
+        <!-- ✨ 表格高度改为跟随视口, 不再写死 600px @yutiansut @quantaxis
+             同上(另一 tab)
+             var(--qa-content-h) 由 layout/index.vue 统一定义 = 100vh - 56(顶栏) - 40(padding),
+             有公告条时自动再减 40px; max(260px, ...) 是极短视口下的兜底 -->
         <el-table
           :data="filteredOrders"
           border
           stripe
-          height="600"
+          :height="'max(260px, calc(var(--qa-content-h, calc(100vh - 96px)) - 233px))'"
           v-loading="ordersLoading"
         >
-          <el-table-column prop="order_id" label="订单ID" width="200" show-overflow-tooltip />
-          <el-table-column prop="user_id" label="账户ID" width="200" show-overflow-tooltip>
+          <el-table-column prop="order_id" label="订单ID" min-width="200" show-overflow-tooltip />
+          <el-table-column prop="user_id" label="账户ID" min-width="200" show-overflow-tooltip>
             <template slot-scope="scope">
               {{ getAccountName(scope.row.user_id) }}
             </template>
           </el-table-column>
-          <el-table-column prop="instrument_id" label="合约" width="100" />
+          <el-table-column prop="instrument_id" label="合约" min-width="100" show-overflow-tooltip/>
           <el-table-column prop="direction" label="方向" width="70" align="center">
             <template slot-scope="scope">
               <el-tag :type="scope.row.direction === 'BUY' ? 'danger' : 'success'" size="mini">
@@ -180,21 +201,21 @@
               {{ scope.row.offset === 'OPEN' ? '开' : '平' }}
             </template>
           </el-table-column>
-          <el-table-column prop="price" label="价格" width="100" align="right">
+          <el-table-column prop="price" label="价格" min-width="100" align="right">
             <template slot-scope="scope">
               {{ scope.row.price.toFixed(2) }}
             </template>
           </el-table-column>
           <el-table-column prop="volume" label="数量" width="80" align="right" />
           <el-table-column prop="filled_volume" label="成交" width="80" align="right" />
-          <el-table-column prop="status" label="状态" width="100" align="center">
+          <el-table-column prop="status" label="状态" min-width="70" align="center">
             <template slot-scope="scope">
               <el-tag :type="getOrderStatusType(scope.row.status)" size="mini">
                 {{ getOrderStatusText(scope.row.status) }}
               </el-tag>
             </template>
           </el-table-column>
-          <el-table-column prop="submit_time" label="提交时间" width="160">
+          <el-table-column prop="submit_time" label="提交时间" min-width="160">
             <template slot-scope="scope">
               {{ formatTimestamp(scope.row.submit_time) }}
             </template>
@@ -219,33 +240,37 @@
           </el-input>
         </div>
 
+        <!-- ✨ 表格高度改为跟随视口, 不再写死 600px @yutiansut @quantaxis
+             同上(另一 tab)
+             var(--qa-content-h) 由 layout/index.vue 统一定义 = 100vh - 56(顶栏) - 40(padding),
+             有公告条时自动再减 40px; max(260px, ...) 是极短视口下的兜底 -->
         <el-table
           :data="filteredTrades"
           border
           stripe
-          height="600"
+          :height="'max(260px, calc(var(--qa-content-h, calc(100vh - 96px)) - 233px))'"
           v-loading="tradesLoading"
         >
-          <el-table-column prop="trade_id" label="成交ID" width="180" show-overflow-tooltip />
-          <el-table-column prop="instrument_id" label="合约" width="100" />
-          <el-table-column prop="buy_user_id" label="买方账户" width="200" show-overflow-tooltip>
+          <el-table-column prop="trade_id" label="成交ID" min-width="155" show-overflow-tooltip />
+          <el-table-column prop="instrument_id" label="合约" min-width="100" show-overflow-tooltip/>
+          <el-table-column prop="buy_user_id" label="买方账户" min-width="120" show-overflow-tooltip>
             <template slot-scope="scope">
               {{ getAccountNameShort(scope.row.buy_user_id) }}
             </template>
           </el-table-column>
-          <el-table-column prop="sell_user_id" label="卖方账户" width="200" show-overflow-tooltip>
+          <el-table-column prop="sell_user_id" label="卖方账户" min-width="125" show-overflow-tooltip>
             <template slot-scope="scope">
               {{ getAccountNameShort(scope.row.sell_user_id) }}
             </template>
           </el-table-column>
-          <el-table-column prop="price" label="成交价" width="100" align="right">
+          <el-table-column prop="price" label="成交价" min-width="100" align="right">
             <template slot-scope="scope">
               {{ scope.row.price.toFixed(2) }}
             </template>
           </el-table-column>
           <el-table-column prop="volume" label="成交量" width="80" align="right" />
-          <el-table-column prop="trading_day" label="交易日" width="100" />
-          <el-table-column prop="timestamp" label="成交时间" width="160">
+          <el-table-column prop="trading_day" label="交易日" min-width="100" />
+          <el-table-column prop="timestamp" label="成交时间" min-width="160">
             <template slot-scope="scope">
               {{ formatTimestamp(scope.row.timestamp) }}
             </template>
@@ -257,7 +282,7 @@
       <el-tab-pane label="实时监控" name="realtime">
         <div class="realtime-monitor">
           <el-row :gutter="20">
-            <el-col :span="12">
+            <el-col :xs="24" :lg="12">
               <el-card shadow="hover">
                 <div slot="header">
                   <span>订单流监控</span>
@@ -280,7 +305,7 @@
                 </div>
               </el-card>
             </el-col>
-            <el-col :span="12">
+            <el-col :xs="24" :lg="12">
               <el-card shadow="hover">
                 <div slot="header">
                   <span>风险监控</span>
@@ -292,7 +317,7 @@
                     size="small"
                     max-height="380"
                   >
-                    <el-table-column prop="user_name" label="账户" width="150" />
+                    <el-table-column prop="user_name" label="账户" min-width="150" />
                     <el-table-column prop="risk_ratio" label="风险率" align="center">
                       <template slot-scope="scope">
                         <el-tag type="danger" size="mini">
@@ -584,6 +609,11 @@ export default {
 
 <style lang="scss" scoped>
 // @yutiansut @quantaxis - 市场总览页面样式（现代化设计）
+// 本文件原先只在下面**本地**定义了几个语义色,没有 $dark-* 系列。
+// 用到暗色变量必须先 import,否则 sass 报 Undefined variable,
+// 整个路由构建失败 → 前端会把你重定向回 /dashboard(排查时极易误判成路由问题)。
+@import '@/styles/variables.scss';
+
 $primary-color: #1890ff;
 $success-color: #52c41a;
 $warning-color: #faad14;
@@ -617,14 +647,20 @@ $danger-color: #f5222d;
     align-items: center;
     gap: 16px;
 
-    i {
-      width: 56px;
-      height: 56px;
+    // ⚠️ 必须是 `> i`(直接子),不能是后代 `i`。
+    // 后代写法会把 .stat-label 里 el-tooltip 的问号图标 <i class="el-icon-question">
+    // 一并撑成 56×56 的 flex 方块,标签被顶成 3 行(实测「活跃订单」)。
+    // @yutiansut @quantaxis
+    > i {
+      // 窄屏 56px 图标会把金额挤到装不下(实测 1366 屏卡片内容区仅 148px,
+      // 而 ¥28,883,972,795.32 需要 196px)。跟视口收一点。
+      width: clamp(42px, 3.2vw, 56px);
+      height: clamp(42px, 3.2vw, 56px);
       border-radius: 12px;
       display: flex;
       align-items: center;
       justify-content: center;
-      font-size: 28px;
+      font-size: clamp(21px, 1.6vw, 28px);
       color: white;
       flex-shrink: 0;
 
@@ -647,6 +683,10 @@ $danger-color: #f5222d;
 
     .stat-content {
       flex: 1;
+      // flex 子项默认 min-width:auto,不会收缩到内容宽度以下 ——
+      // 56px 图标 + 28px 等宽金额撑出 358px,而卡片只有 219px。
+      // 必须显式 min-width:0 才能让下面的 ellipsis 生效。@yutiansut @quantaxis
+      min-width: 0;
 
       .stat-label {
         font-size: 13px;
@@ -656,11 +696,14 @@ $danger-color: #f5222d;
       }
 
       .stat-value {
-        font-size: 28px;
+        font-size: clamp(16px, 1.4vw, 28px);   // 见 dashboard 同名注释
         font-weight: 700;
-        color: #303133;
+        color: #8b949e !important;
         line-height: 1.2;
         font-family: 'JetBrains Mono', monospace;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
       }
     }
   }
@@ -669,14 +712,21 @@ $danger-color: #f5222d;
   ::v-deep .el-tabs--border-card {
     border-radius: 12px;
     border: none;
+    background: $dark-bg-secondary;   // 不声明则露 Element 默认 #FFF
     box-shadow: 0 2px 12px rgba(0, 0, 0, 0.04);
     overflow: hidden;
 
     > .el-tabs__header {
-      background: #fafafa;
-      border-bottom: 1px solid #f0f0f0;
+      background: #21262d;
+      border-bottom: 1px solid #30363d;
 
       .el-tabs__item {
+        /* ⚠️ 缺 background 声明 → 露出 Element 默认白底(实测 98×48 呈
+           rgb(255,255,255))。全局规则在 styles/index.scss 里已加,
+           但本文件的 ::v-deep 嵌套优先级更高,必须在这里也声明。
+           @yutiansut @quantaxis */
+        background: transparent;
+        color: #8b949e;
         height: 48px;
         line-height: 48px;
         font-weight: 500;
@@ -685,6 +735,11 @@ $danger-color: #f5222d;
         &.is-active {
           font-weight: 600;
           color: $primary-color;
+          // Element 给 border-card 的 is-active 单独指定了
+          // border-left/right-color:#DCDFE6 → 页签两侧两根白线
+          background-color: $dark-bg-secondary;
+          border-left-color: $dark-border;
+          border-right-color: $dark-border;
         }
 
         &:hover {
@@ -705,7 +760,7 @@ $danger-color: #f5222d;
     gap: 12px;
     margin-bottom: 16px;
     padding: 16px;
-    background: #fafafa;
+    background: #21262d;
     border-radius: 8px;
   }
 
@@ -715,9 +770,9 @@ $danger-color: #f5222d;
     overflow: hidden;
 
     th {
-      background-color: #fafafa !important;
+      background-color: #21262d !important;
       font-weight: 600;
-      color: #303133;
+      color: #8b949e !important;
     }
 
     .el-table__row:hover > td {
@@ -758,7 +813,7 @@ $danger-color: #f5222d;
       padding: 12px 16px;
       border-radius: 8px;
       margin-bottom: 8px;
-      background: #fafafa;
+      background: #21262d;
       gap: 16px;
       transition: all 0.2s ease;
 
@@ -802,10 +857,10 @@ $danger-color: #f5222d;
       box-shadow: 0 2px 12px rgba(0, 0, 0, 0.04);
 
       .el-card__header {
-        border-bottom: 1px solid #f0f0f0;
+        border-bottom: 1px solid #30363d;
         padding: 16px 20px;
         font-weight: 600;
-        color: #303133;
+        color: #8b949e !important;
       }
     }
   }

@@ -779,19 +779,36 @@ impl SettlementEngine {
         let current_margin = acc.accounts.margin;
 
         // 计算持仓盈亏
+        //
+        // ✨ 必须乘合约乘数 @yutiansut @quantaxis
+        //
+        // 原实现是 `(结算价 - 开仓价) * 手数`,**漏了合约乘数**。
+        // IF2501 乘数 300:1 手动 10 个点应为 10×1×300 = 3000 元,原式算成 10 元。
+        // `grep -c multiplier src/exchange/settlement.rs` 补丁前为 0。
+        //
+        // 乘数就在持仓自己身上:QA_Position.preset.unit_table
+        // (qars2 marketpreset.rs:99),qars2 的 QA_Position 自己也一致地用它
+        // (position.rs:305,307,327,334,387)。
+        //
+        // 影响面见 :849 —— 那里会用这个值**覆盖** acc.settle() 已算好的
+        // position_profit,所以错值会真的落到账户上。
         let mut position_profit = 0.0;
         for (code, pos) in acc.hold.iter() {
             if let Some(settlement_price) = self.settlement_prices.get(code) {
+                let unit = pos.preset.unit_table as f64;
+
                 // 多头盈亏
                 let long_volume = pos.volume_long_today + pos.volume_long_his;
                 if long_volume > 0.0 {
-                    position_profit += (settlement_price.value() - pos.open_price_long) * long_volume;
+                    position_profit +=
+                        (settlement_price.value() - pos.open_price_long) * long_volume * unit;
                 }
 
                 // 空头盈亏
                 let short_volume = pos.volume_short_today + pos.volume_short_his;
                 if short_volume > 0.0 {
-                    position_profit += (pos.open_price_short - settlement_price.value()) * short_volume;
+                    position_profit +=
+                        (pos.open_price_short - settlement_price.value()) * short_volume * unit;
                 }
             }
         }
@@ -800,7 +817,24 @@ impl SettlementEngine {
         let new_balance = pre_balance + position_profit + close_profit - commission;
 
         // 计算风险度
-        let risk_ratio = if new_balance > 0.0 {
+        //
+        // ✨ 无保证金占用 ⇒ 风险度 0,而不是无穷大 @yutiansut @quantaxis
+        //
+        // 原实现只判 `new_balance > 0.0`,否则一律 999.0 → 触发强平。
+        // 但 register 会自动创建 init_cash=0 的默认账户,这些账户
+        // 余额 0、保证金 0、无持仓,却因为 `0 > 0.0` 为假被判 999.0 → 强平。
+        //
+        // 实测(隔离实例日终结算,13 个账户):
+        //   5 个 ~20 亿 + 有保证金  → 未强平 ✓
+        //   1 个 5 亿 + 0 保证金    → 未强平 ✓
+        //   7 个 0 余额 + 0 保证金  → **全部被标记强平** ✗
+        //   force_closed_accounts 里正好这 7 个
+        //
+        // 风险度 = 保证金 / 权益。保证金为 0 就是没有持仓,无仓可平,
+        // 无论权益多少风险度都是 0。
+        let risk_ratio = if current_margin <= 0.0 {
+            0.0
+        } else if new_balance > 0.0 {
             current_margin / new_balance
         } else {
             999.0

@@ -221,14 +221,33 @@ pub async fn do_transfer(
         )));
     }
 
-    // 验证密码（简化处理，实际需要调用银行接口）
-    // 这里只做基本验证
+    // 验证密码 @yutiansut @quantaxis
     if req.bank_password.is_empty() || req.future_password.is_empty() {
         return Ok(HttpResponse::BadRequest().json(ApiResponse::<()>::error(
             4003,
             "银行密码或期货密码不能为空".to_string(),
         )));
     }
+
+    // ✨ 期货端资金密码必须真的校验,不能只判非空
+    //
+    // 原实现只有上面那个 is_empty() 检查,注释写着「简化处理」。
+    // 实测:`future_password:"x"` 转入 50,000 直接成功 —— 密码字段纯装饰,
+    // 而前端 TransferForm.vue:76,164 是有真实输入框并要求用户填的,
+    // UI 本来就期望它被校验。
+    if !crate::service::http::account_admin::verify_account_password(
+        &req.account_id,
+        crate::service::http::models::PasswordType::Fund,
+        &req.future_password,
+    ) {
+        return Ok(HttpResponse::BadRequest().json(ApiResponse::<()>::error(
+            4003,
+            "期货资金密码错误".to_string(),
+        )));
+    }
+
+    // bank_password 仍然只判非空 —— 校验它需要真实的银行接口(本系统没有),
+    // 在这里假装校验会制造虚假的安全感。保持现状并明确记录。
 
     // 执行转账
     let mut acc = account.write();

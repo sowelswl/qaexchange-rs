@@ -44,8 +44,19 @@ pub struct SchedulerConfig {
 impl Default for SchedulerConfig {
     fn default() -> Self {
         Self {
-            scan_interval_secs: 300,    // 5 分钟扫描一次
-            min_sstables_per_batch: 3,  // 至少 3 个文件才批量转换
+            // ⚠️ 扫描间隔与攒批阈值必须和 compaction 的节奏兼容。
+            // compaction 每 **10 秒**检查一次(compaction/scheduler.rs:62),
+            // L0 攒到 `level0_max_files = 4`(compaction/mod.rs:39)就合并并**删除输入文件**。
+            // 原来这里是「每 300 秒扫一次、要求 ≥3 个文件且 ≥60 秒未修改」——
+            // 快 30 倍的 compaction 永远先到,实测各 store 稳定在 1–2 个 SST
+            // (75 秒采样),所以攒批条件从未满足过,`olap.total_tasks` 恒为 0。
+            //
+            // 改为「每 60 秒扫、≥1 个文件」:OLAP 的目标是「最终都转换」
+            // 而非「攒批省 IO」,`ConversionMetadata` 已记录转换过的文件不会重复转。
+            // 代价是 Parquet 行组更小、查询略慢,换来这个子系统真正开始工作。
+            // @yutiansut @quantaxis
+            scan_interval_secs: 60,
+            min_sstables_per_batch: 1,
             max_sstables_per_batch: 20, // 最多 20 个文件一批
             min_sstable_age_secs: 60,   // 文件至少 1 分钟未修改
             max_retries: 5,             // 最多重试 5 次
@@ -132,7 +143,16 @@ impl ConversionScheduler {
         let instruments = self.scan_instruments()?;
 
         for instrument_id in instruments {
-            let oltp_dir = self.storage_base_path.join(&instrument_id).join("oltp");
+            // ⚠️ 目录名必须与**写入方**一致。
+            // 写入方一律用 "sstables"(hybrid/oltp.rs:121,393,463;
+            // compaction/leveled.rs:111,146),而这里原来写的是 "oltp" ——
+            // 该目录从未被任何代码创建过(线上实测 find -type d -name oltp = 0 个),
+            // 于是下面的 `!exists() { continue }` 每次扫描、每个品种都静默跳过,
+            // `olap.total_tasks` 恒为 0,与 SST 有多少无关。
+            // 单元测试 test_scan_oltp_sstables 自己 create_dir_all("oltp") 再写
+            // "*.rkyv",把扫描器期望的世界造了出来,所以一直绿灯。
+            // @yutiansut @quantaxis
+            let oltp_dir = self.storage_base_path.join(&instrument_id).join("sstables");
 
             if !oltp_dir.exists() {
                 continue;
@@ -199,8 +219,11 @@ impl ConversionScheduler {
             let entry = entry.map_err(|e| format!("Read entry failed: {}", e))?;
             let path = entry.path();
 
-            // 只处理 .rkyv 文件
-            if !path.extension().map(|e| e == "rkyv").unwrap_or(false) {
+            // 只处理 .sst 文件
+            // ⚠️ 同上:写入方产出的是 `.sst`(如 0000000001.sst / l2_<ts>.sst),
+            // 原来这里过滤 `.rkyv` —— 即使目录名对了也一个都收不到。
+            // 两处错配彼此独立,任何一个单独存在都足以让转换永不触发。
+            if !path.extension().map(|e| e == "sst").unwrap_or(false) {
                 continue;
             }
 
@@ -457,13 +480,18 @@ mod tests {
     #[test]
     fn test_scan_oltp_sstables() {
         let tmp_dir = tempdir().unwrap();
-        let oltp_dir = tmp_dir.path().join("oltp");
+        // ⚠️ 目录名与扩展名必须跟**生产写入方**一致(sstables/ + .sst)。
+        // 本测试原来造的是 oltp/ + .rkyv —— 两者线上都不存在,
+        // 测试因此长期绿灯而扫描器线上一个任务都产不出。
+        // 测试要验的是真实世界,不是代码期望的世界。@yutiansut @quantaxis
+        let oltp_dir = tmp_dir.path().join("sstables");
         std::fs::create_dir_all(&oltp_dir).unwrap();
 
-        // 创建测试文件
-        std::fs::write(oltp_dir.join("sstable_1.rkyv"), b"test").unwrap();
-        std::fs::write(oltp_dir.join("sstable_2.rkyv"), b"test").unwrap();
+        // 创建测试文件(命名对齐 hybrid/oltp.rs 的产出)
+        std::fs::write(oltp_dir.join("0000000001.sst"), b"test").unwrap();
+        std::fs::write(oltp_dir.join("0000000002.sst"), b"test").unwrap();
         std::fs::write(oltp_dir.join("other.txt"), b"test").unwrap();
+        std::fs::write(oltp_dir.join("legacy.rkyv"), b"test").unwrap();   // 旧后缀不应被收
 
         // 等待文件年龄超过阈值
         std::thread::sleep(Duration::from_secs(1));

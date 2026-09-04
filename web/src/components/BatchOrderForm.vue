@@ -291,6 +291,8 @@ export default {
         this.submitting = true
 
         const data = {
+          // 后端需要 user_id 校验 account_id 归属 @yutiansut @quantaxis
+          user_id: this.$store.state.currentUser,
           account_id: this.currentAccountId,
           orders: this.orders.map(o => ({
             instrument_id: o.instrument_id.trim().toUpperCase(),
@@ -302,18 +304,15 @@ export default {
           }))
         }
 
+        // request 拦截器已解包，直接拿到 { total, success_count, failed_count, results }
         const res = await batchSubmitOrders(data)
 
-        if (res.data && res.data.success) {
-          this.submitResult = res.data.data
-          this.successMessage = `批量下单完成！成功 ${res.data.data.success_count} 笔，失败 ${res.data.data.failed_count} 笔`
+        this.submitResult = res
+        this.successMessage = `批量下单完成！成功 ${res.success_count} 笔，失败 ${res.failed_count} 笔`
 
-          // 如果全部成功，清空订单列表
-          if (res.data.data.failed_count === 0) {
-            this.orders = [this.createEmptyOrder()]
-          }
-        } else {
-          this.errorMessage = (res.data && res.data.error) || '批量下单失败'
+        // 如果全部成功，清空订单列表
+        if (res.failed_count === 0) {
+          this.orders = [this.createEmptyOrder()]
         }
       } catch (error) {
         console.error('[BatchOrderForm] Batch submit failed:', error)

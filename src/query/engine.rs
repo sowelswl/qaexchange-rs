@@ -394,7 +394,7 @@ mod tests {
 
                 let record = WalRecord::OrderInsert {
                     order_id: i as u64,
-                    user_id: [1u8; 32],
+                    user_id: [1u8; 40],
                     instrument_id: [2u8; 16],
                     direction: (i % 2) as u8,
                     offset: 0,

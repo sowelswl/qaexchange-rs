@@ -94,6 +94,51 @@ pub struct OrderCheckRequest {
     pub price: f64,         // 向后兼容
     pub limit_price: f64,   // 订单价格（用于自成交检查）
     pub price_type: String, // LIMIT/MARKET/ANY（用于自成交检查）
+
+    // ── 合约参数 —— 由 order_router 从 instrument_registry 取好传入 ──
+    //
+    // ⚠️ 为什么必须带进来:本模块此前所有金额都用 `price * volume` 直算,
+    // **漏了合约乘数**。IF2501 乘数 300、保证金率 12%,
+    // 一手 3800 点真实占用 136,800,而旧口径买开算 3,800、卖开算 760。
+    // 后果:check_funds 的闸门形同虚设(实测 NOISE_BUY/NOISE_SELL 的
+    // `available` 被冻成 -211,730 / -190,348),
+    // check_position_limit 的比例分子小 300 倍 → 50% 的持仓限额实际允许 150 倍。
+    //
+    // 注册表查询放在 order_router(它本来就为合约状态检查查过一次),
+    // 这里只接收结果 —— 避免本模块再持有一份 registry 引用,
+    // 也避免同一订单查两次。@yutiansut @quantaxis
+    pub contract_multiplier: f64,
+    pub margin_rate: f64,
+    pub commission_rate: f64,
+}
+
+impl Default for OrderCheckRequest {
+    /// ⚠️ 仅供测试/示例构造使用。合约参数退回「乘数 1 / 保证金率 20% / 手续费万三」
+    /// 的旧口径 —— **生产路径必须由 order_router 从 instrument_registry 取真值传入**,
+    /// 不要依赖这里的默认值。@yutiansut @quantaxis
+    fn default() -> Self {
+        Self {
+            account_id: String::new(),
+            instrument_id: String::new(),
+            direction: "BUY".to_string(),
+            offset: "OPEN".to_string(),
+            volume: 0.0,
+            price: 0.0,
+            limit_price: 0.0,
+            price_type: "LIMIT".to_string(),
+            contract_multiplier: 1.0,
+            margin_rate: 0.2,
+            commission_rate: 0.0003,
+        }
+    }
+}
+
+impl OrderCheckRequest {
+    /// 名义金额 = 价格 × 数量 × 合约乘数
+    #[inline]
+    pub fn notional(&self) -> f64 {
+        self.price * self.volume * self.contract_multiplier
+    }
 }
 
 /// 活动订单信息（用于自成交防范）
@@ -200,7 +245,7 @@ impl PreTradeCheck {
         if req.price_type == "MARKET" {
             return Ok(()); // 市价单跳过金额检查
         }
-        let order_amount = req.price * req.volume;
+        let order_amount = req.notional();   // 名义金额,含合约乘数
         if order_amount > config.max_order_amount {
             return Err(ExchangeError::RiskCheckFailed(format!(
                 "Order amount {} exceeds limit {}",
@@ -219,16 +264,14 @@ impl PreTradeCheck {
     ) -> Result<Option<RiskCheckResult>, ExchangeError> {
         let acc = account.read();
 
-        // 计算所需资金 (简化: 价格 * 数量 + 手续费估算)
-        let estimated_commission = req.price * req.volume * 0.0003; // 万3手续费
-        let required_funds = if req.direction == "BUY" && req.offset == "OPEN" {
-            // 买开仓需要全额资金
-            req.price * req.volume + estimated_commission
-        } else if req.direction == "SELL" && req.offset == "OPEN" {
-            // 卖开仓需要保证金 (简化: 20%)
-            req.price * req.volume * 0.2 + estimated_commission
+        // 计算所需资金 —— 口径必须与 order_router 的预检一致(见 OrderCheckRequest 注释)
+        let notional = req.notional();
+        let estimated_commission = notional * req.commission_rate;
+        let required_funds = if req.offset == "OPEN" {
+            // 期货开仓买卖同向占用保证金
+            notional * req.margin_rate + estimated_commission
         } else {
-            // 平仓只需手续费
+            // 平仓不占新保证金,只需手续费
             estimated_commission
         };
 
@@ -282,7 +325,10 @@ impl PreTradeCheck {
                 }));
             };
 
-            let position_ratio = (new_position * req.price) / total_value;
+            // 分子必须是**名义金额**(含乘数),否则比例小两个数量级 ——
+            // 50% 的限额实际允许 150 倍持仓。@yutiansut @quantaxis
+            let position_ratio =
+                (new_position * req.price * req.contract_multiplier) / total_value;
 
             if position_ratio > config.max_position_ratio {
                 return Ok(Some(RiskCheckResult::Reject {
@@ -515,6 +561,7 @@ mod tests {
             price: 100.0,
             limit_price: 100.0,
             price_type: "LIMIT".to_string(),
+            ..Default::default()
         };
 
         assert!(checker.check_order_params(&req).is_ok());
@@ -551,6 +598,7 @@ mod tests {
             price: 100.0,
             limit_price: 100.0,
             price_type: "LIMIT".to_string(),
+            ..Default::default()
         };
 
         let result = checker.check_funds(&account, &req).unwrap();
@@ -584,6 +632,7 @@ mod tests {
             price: 100.0,
             limit_price: 100.0,
             price_type: "LIMIT".to_string(),
+            ..Default::default()
         };
 
         let result = checker.check(&req).unwrap();
@@ -644,6 +693,7 @@ mod tests {
             price: 100.0,
             limit_price: 100.0, // ✅ 卖价 100 <= 买价 100，会成交
             price_type: "LIMIT".to_string(),
+            ..Default::default()
         };
 
         let result = checker.check(&req).unwrap();
@@ -802,6 +852,7 @@ mod tests {
             price: 100.0,
             limit_price: 100.0,
             price_type: "LIMIT".to_string(),
+            ..Default::default()
         };
 
         let result = checker.check_order_params(&req);
@@ -824,6 +875,7 @@ mod tests {
             price: 0.0, // 市价单允许价格为0
             limit_price: 0.0,
             price_type: "MARKET".to_string(),
+            ..Default::default()
         };
 
         assert!(checker.check_order_params(&req).is_ok());
@@ -845,6 +897,7 @@ mod tests {
             price: 200.0,
             limit_price: 200.0,
             price_type: "LIMIT".to_string(),
+            ..Default::default()
         };
 
         let result = checker.check_order_params(&req);
@@ -872,6 +925,7 @@ mod tests {
             price: 100.0,
             limit_price: 100.0,
             price_type: "LIMIT".to_string(),
+            ..Default::default()
         };
 
         let result = checker.check_funds(&account, &req).unwrap();
@@ -900,6 +954,7 @@ mod tests {
             price: 100.0,
             limit_price: 100.0,
             price_type: "LIMIT".to_string(),
+            ..Default::default()
         };
 
         let result = checker.check_funds(&account, &req).unwrap();
@@ -935,6 +990,7 @@ mod tests {
             price: 100.0,
             limit_price: 100.0,
             price_type: "LIMIT".to_string(),
+            ..Default::default()
         };
 
         let result = checker.check_self_trading(&req).unwrap();
@@ -968,6 +1024,7 @@ mod tests {
             price: 120.0,
             limit_price: 120.0, // 卖价 120 > 买价 100，不会成交
             price_type: "LIMIT".to_string(),
+            ..Default::default()
         };
 
         let result = checker.check(&req).unwrap();
@@ -1000,6 +1057,7 @@ mod tests {
             price: 0.0,
             limit_price: 0.0,
             price_type: "MARKET".to_string(),
+            ..Default::default()
         };
 
         let result = checker.check_self_trading(&req).unwrap();
@@ -1073,6 +1131,7 @@ mod tests {
             price: 100.0,
             limit_price: 100.0,
             price_type: "LIMIT".to_string(),
+            ..Default::default()
         };
 
         let result = checker.check(&req);
@@ -1109,6 +1168,7 @@ mod tests {
             price: 100.0,
             limit_price: 100.0,
             price_type: "LIMIT".to_string(),
+            ..Default::default()
         };
 
         let result = checker.check(&req).unwrap();
@@ -1132,6 +1192,7 @@ mod tests {
             price: 100.0,
             limit_price: 100.0,
             price_type: "LIMIT".to_string(),
+            ..Default::default()
         };
 
         assert!(checker.check_order_params(&req).is_ok());
@@ -1152,6 +1213,7 @@ mod tests {
             price: 100.0,
             limit_price: 100.0,
             price_type: "LIMIT".to_string(),
+            ..Default::default()
         };
 
         assert!(checker.check_order_params(&req).is_ok());

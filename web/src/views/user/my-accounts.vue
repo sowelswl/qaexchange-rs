@@ -14,25 +14,25 @@
 
       <!-- 账户统计 -->
       <el-row :gutter="20" class="stats-row">
-        <el-col :span="6">
+        <el-col :xs="24" :sm="12" :lg="6">
           <div class="stat-card">
             <div class="stat-label">账户总数</div>
             <div class="stat-value">{{ accounts.length }}</div>
           </div>
         </el-col>
-        <el-col :span="6">
+        <el-col :xs="24" :sm="12" :lg="6">
           <div class="stat-card">
             <div class="stat-label">总资产</div>
             <div class="stat-value">{{ totalBalance.toFixed(2) }}</div>
           </div>
         </el-col>
-        <el-col :span="6">
+        <el-col :xs="24" :sm="12" :lg="6">
           <div class="stat-card">
             <div class="stat-label">可用资金</div>
             <div class="stat-value">{{ totalAvailable.toFixed(2) }}</div>
           </div>
         </el-col>
-        <el-col :span="6">
+        <el-col :xs="24" :sm="12" :lg="6">
           <div class="stat-card">
             <div class="stat-label">占用保证金</div>
             <div class="stat-value">{{ totalMargin.toFixed(2) }}</div>
@@ -52,7 +52,7 @@
           <el-table-column
             prop="account_id"
             label="账户ID"
-            width="280"
+            min-width="280"
             show-overflow-tooltip
           >
             <template slot-scope="scope">
@@ -69,7 +69,7 @@
           <el-table-column
             prop="account_type"
             label="账户类型"
-            width="120"
+            min-width="120"
           >
             <template slot-scope="scope">
               <el-tag
@@ -84,7 +84,7 @@
           <el-table-column
             prop="balance"
             label="总资产"
-            width="130"
+            min-width="130"
             align="right"
           >
             <template slot-scope="scope">
@@ -95,7 +95,7 @@
           <el-table-column
             prop="available"
             label="可用资金"
-            width="130"
+            min-width="130"
             align="right"
           >
             <template slot-scope="scope">
@@ -106,7 +106,7 @@
           <el-table-column
             prop="margin"
             label="占用保证金"
-            width="130"
+            min-width="130"
             align="right"
           >
             <template slot-scope="scope">
@@ -117,7 +117,7 @@
           <el-table-column
             prop="risk_ratio"
             label="风险率"
-            width="120"
+            min-width="120"
             align="center"
           >
             <template slot-scope="scope">
@@ -133,7 +133,7 @@
           <el-table-column
             prop="created_at"
             label="创建时间"
-            width="180"
+            min-width="180"
           >
             <template slot-scope="scope">
               {{ formatTimestamp(scope.row.created_at) }}

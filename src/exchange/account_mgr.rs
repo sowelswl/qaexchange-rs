@@ -196,10 +196,26 @@ impl AccountManager {
         // 获取元数据（用于更新用户账户索引）
         let metadata = self.metadata.get(account_id).map(|m| m.clone());
 
-        if let Some((_, account)) = self.accounts.remove(account_id) {
+        // ✨ 先校验,后删除 @yutiansut @quantaxis
+        //
+        // 原实现是 `if let Some((_, account)) = self.accounts.remove(account_id)` ——
+        // **remove 无条件先执行**,然后才检查持仓和余额。校验失败时直接
+        // `return Err(...)`,账户**永不回插**:它已经从 accounts 表里消失,
+        // 而 metadata / user_accounts / user_manager 的绑定还留着 → 状态不一致,
+        // 账户静默丢失且无法通过任何接口找回。
+        //
+        // 该函数目前**无 HTTP 端点**(routes.rs 里没有销户路由),唯一的其他引用是
+        // `test_close_account_not_found`,而那个测试只覆盖「账户不存在」,
+        // 恰好绕过了这两条会丢数据的分支 —— 所以这是个等着被暴露的雷。
+        //
+        // ⚠️ 校验块必须自成一个作用域:DashMap 的 Ref 未释放就对同一张表
+        // 调 remove 会死锁。
+        {
+            let account = self.accounts.get(account_id).ok_or_else(|| {
+                ExchangeError::AccountError(format!("Account not found: {}", account_id))
+            })?;
             let acc = account.read();
 
-            // 检查账户是否可以销户
             if !acc.hold.is_empty() {
                 return Err(ExchangeError::AccountError(
                     "Cannot close account with open positions".to_string(),
@@ -211,7 +227,9 @@ impl AccountManager {
                     "Cannot close account with remaining balance".to_string(),
                 ));
             }
+        }
 
+        if self.accounts.remove(account_id).is_some() {
             // 从用户账户索引中移除
             if let Some(meta) = metadata {
                 if let Some(mut accounts) = self.user_accounts.get_mut(&meta.user_id) {
@@ -381,6 +399,36 @@ impl AccountManager {
 
     /// 统计指定合约的总持仓量（多空取最大值，避免重复计数）
     // @yutiansut @quantaxis: 用写锁调用 qars 的 volume_long()/volume_short()
+    /// 计算某合约的持仓量(OI)
+    ///
+    /// ⚠️ **当前实现有两个问题,且这条路径没有消费者** @yutiansut @quantaxis
+    ///
+    /// ### 问题 1:`max(long, short)` 求和不是持仓量
+    /// 交易所的 OI = 未平仓合约数 = **全市场多头总量**(应等于空头总量)。
+    /// 这里对**每个账户**取多空较大值再求和:
+    ///   · 持 10 多 0 空 → 贡献 10  ✓
+    ///   · 持 3  多 10 空 → 贡献 10  ✗ 应为 3(多头侧)
+    /// 双边持仓的账户会被高估。正解是 `sum(volume_long)` 或 `sum(volume_short)`。
+    ///
+    /// ### 问题 2:为了读持仓对每个账户取**写锁**
+    /// `entry.value().write()` —— O(账户数) 次写锁,且被 1 秒一轮的
+    /// 快照生成器调用(snapshot_generator.rs:430)。
+    ///
+    /// ### 为什么不修
+    /// 唯一调用方是 `MarketSnapshotGenerator`,而它的输出
+    /// (`MarketDataService::subscribe_snapshots`)**零消费者** ——
+    /// 全库 grep 无非定义引用。所以这个值目前不会到达任何客户端。
+    ///
+    /// 与此同时,**有消费者的那条路不算 OI**:
+    /// DIFF 协议只从 `MarketDataEvent` 转换
+    /// (diff_handler.rs `convert_market_event_to_diff`),而
+    /// `MarketDataEvent` 的四个变体(Tick / LastPrice / OrderBookSnapshot /
+    /// KLineFinished)**一个都不带 OI 字段** —— 尽管
+    /// `protocol/diff/types.rs:157` 声明了 `open_interest` / `pre_open_interest`。
+    /// 实测:DIFF 客户端收到的 quote 里 `open_interest` 恒为 undefined。
+    ///
+    /// 即:**算了 OI 的那条路没有消费者,有消费者的那条路不算 OI。**
+    /// 要修先决定启用哪条,再一并处理算法与锁的问题。
     pub fn get_instrument_open_interest(&self, instrument_id: &str) -> i64 {
         self.accounts
             .iter()

@@ -232,13 +232,19 @@ pub struct OrderRouter {
     /// 用户订单索引 (user_id -> Vec<order_id>)
     user_orders: DashMap<String, Arc<RwLock<Vec<String>>>>,
 
-    /// ✨ 撮合引擎订单ID反向索引 (matching_engine_order_id -> order_id) @yutiansut @quantaxis
-    /// 用于在成交时通过对手单的matching_engine_order_id找到对应的order_id
-    engine_id_to_order: DashMap<u64, String>,
+    /// ✨ 撮合引擎订单ID反向索引 ((instrument_id, matching_engine_order_id) -> order_id)
+    /// @yutiansut @quantaxis
+    ///
+    /// ⚠️ 键**必须**带 instrument_id：qars2 的 `seq` 是每个 Orderbook 各一份的字段
+    /// (`qars2/src/qamarket/matchengine/orderbook.rs:132,161`)，都从 `MIN_SEQUENCE_ID = 1`
+    /// 起算。IF2501 的 engine_id 42 和 IH2501 的 engine_id 42 是两个毫不相干的订单。
+    /// 原先用 `DashMap<u64, String>` 全局索引 → 后写者覆盖先写者，成交时把对手方
+    /// 解析成另一个合约上、另一个账户的订单。
+    engine_id_to_order: DashMap<(String, u64), String>,
 
     /// ✨ 撮合引擎订单ID → user_id 直接映射 (性能优化) @yutiansut @quantaxis
     /// 避免成交时两次查找（engine_id→order_id→user_id），直接 O(1) 获取
-    engine_id_to_user: DashMap<u64, String>,
+    engine_id_to_user: DashMap<(String, u64), String>,
 
     /// 订单序号生成器
     order_seq: AtomicU64,
@@ -424,9 +430,43 @@ impl OrderRouter {
 
     fn submit_order_with_options(
         &self,
-        req: SubmitOrderRequest,
+        mut req: SubmitOrderRequest,
         opts: OrderSubmitOptions,
     ) -> SubmitOrderResponse {
+        // 0. offset 归一化 + 未知值拒单 @yutiansut @quantaxis
+        //
+        // ⚠️ 这一步以前没有,后果是**方向做反、真金白银**:
+        //   前端 components/{BatchOrderForm,ConditionalOrderForm}.vue 的
+        //   「平今/平昨」发的是 `CLOSE_TODAY` / `CLOSE_YESTERDAY`(带下划线,
+        //   与 protocol/diff/types.rs:439 的常量一致),而 `calculate_towards`
+        //   只匹配 `OPEN`/`CLOSE`/`CLOSETODAY`,未知值落 `_ => 2`(**买开**)。
+        //   订单随后由 `QAOrder::new(.., towards, ..)` 从 towards 反推 offset,
+        //   于是回读也变成 OPEN —— 全程无报错、界面显示「成功」。
+        //
+        //   实测(2026-09-04):
+        //     offset=OPEN            → 回读 OPEN     ✓
+        //     offset=CLOSETODAY      → 正确拒单(无持仓可平)
+        //     offset=CLOSE_TODAY     → 回读 OPEN     ✗ 平今变成开仓
+        //     offset=CLOSE_YESTERDAY → 回读 OPEN     ✗ 平昨变成开仓
+        //
+        //   `CLOSEYESTERDAY`(规范拼写)同样没有 match 分支,一并补上 ——
+        //   risk/pre_trade_check.rs:348 认它,order_router 不认。
+        match Self::normalize_offset(&req.offset) {
+            Some(canonical) => req.offset = canonical.to_string(),
+            None => {
+                return SubmitOrderResponse {
+                    success: false,
+                    order_id: None,
+                    status: Some("rejected".to_string()),
+                    error_message: Some(format!(
+                        "无效的开平标志 offset={:?};合法值:OPEN / CLOSE / CLOSETODAY / CLOSEYESTERDAY                          (也接受 CLOSE_TODAY / CLOSE_YESTERDAY 写法)",
+                        req.offset
+                    )),
+                    error_code: Some(4003), // 无效开平标志(4002 已被「无行情」占用)
+                };
+            }
+        }
+
         // 1. 生成订单ID（无锁操作）
         let order_id = self.generate_order_id();
 
@@ -463,14 +503,67 @@ impl OrderRouter {
         };
 
         // 2. 预计算所需资金（无锁操作）
-        let estimated_commission = req.price * req.volume * 0.0003; // 万3手续费
-        let required_funds = if req.direction == "BUY" && req.offset == "OPEN" {
-            req.price * req.volume + estimated_commission
-        } else if req.direction == "SELL" && req.offset == "OPEN" {
-            req.price * req.volume * 0.2 + estimated_commission
+        //
+        // ⚠️ 原实现漏了**合约乘数**,估算比真实保证金小两个数量级:
+        //     BUY  OPEN: price * volume + commission          ← 没乘 multiplier
+        //     SELL OPEN: price * volume * 0.2 + commission    ← 0.2 是写死的保证金率替代
+        //   IF2501 一手 3800 点、乘数 300、保证金率 12% → 真实占用约 136,800,
+        //   而估算给出 3,800。于是 7.1 的资金二次校验形同虚设:
+        //   money 被真实冻结一路扣到接近 3,800 才第一次不通过,而那一单
+        //   又冻掉 136,800 → money = 3,800 - 136,800 ≈ -133,000。
+        //
+        //   2026-09-04 压测实测:NOISE_BUY 可用 -211,730.51、
+        //   NOISE_SELL 可用 -190,348.54,溢出量级正好是一单的真实保证金。
+        //   随后风控持续拒单(505 笔 `available=-190348.54`)。
+        //
+        //   乘数与保证金率从 instrument_registry 取 —— 本函数 :526 处
+        //   已经在用同一个 registry 做合约状态检查,没有额外开销。
+        //   未注册的合约退回原有粗略口径,保持增量、不改变既有行为。
+        //   @yutiansut @quantaxis
+        let (multiplier, margin_rate, commission_rate) = self
+            .instrument_registry
+            .get(&req.instrument_id)
+            .map(|i| (i.contract_multiplier as f64, i.margin_rate, i.commission_rate))
+            .unwrap_or((1.0, 0.2, 0.0003));
+
+        let notional = req.price * req.volume * multiplier;
+        let estimated_commission = notional * commission_rate;
+        let required_funds = if req.offset == "OPEN" {
+            // 期货开仓(买卖同向占用):保证金 = 名义金额 × 保证金率
+            notional * margin_rate + estimated_commission
         } else {
+            // 平仓不占新保证金,只需手续费
             estimated_commission
         };
+
+        // 2.4 合约状态检查 @yutiansut @quantaxis
+        //
+        // InstrumentRegistry::is_trading / status 此前只被自身单测消费（10 处断言），
+        // 生产下单路径从未读取 —— 导致 /api/admin/instrument/{id}/suspend 与 /delist
+        // 只改注册表的状态位，暂停/下市的合约照样可以下单成交。
+        //
+        // 刻意只在「合约已注册且状态非 Active」时拒单:
+        // 未注册的合约保持原有行为（继续走到撮合引擎，由其返回 Instrument not found），
+        // 使本补丁严格增量、不改变任何现有可交易合约的行为。
+        //
+        // 只拦下单，不拦撤单 —— 合约暂停后必须仍能撤掉挂单。
+        if let Some(inst) = self.instrument_registry.get(&req.instrument_id) {
+            use crate::exchange::instrument_registry::InstrumentStatus;
+            if inst.status != InstrumentStatus::Active {
+                let reason = format!(
+                    "Instrument {} is not tradable (status: {:?})",
+                    req.instrument_id, inst.status
+                );
+                log::warn!("Order rejected by instrument status: {}", reason);
+                return SubmitOrderResponse {
+                    success: false,
+                    order_id: Some(order_id.clone()),
+                    status: Some("rejected".to_string()),
+                    error_message: Some(reason),
+                    error_code: Some(4101), // 合约状态拒绝
+                };
+            }
+        }
 
         // 2.5 交易状态检查 @yutiansut @quantaxis
         if let Some(ref state_machine) = self.trading_state_machine {
@@ -505,6 +598,11 @@ impl OrderRouter {
                 price: req.price,
                 limit_price: req.price,
                 price_type: req.order_type.clone(),
+                // 合约参数在 :507 已从 instrument_registry 取好,直接传入,
+                // 避免风控模块再查一次注册表。@yutiansut @quantaxis
+                contract_multiplier: multiplier,
+                margin_rate,
+                commission_rate,
             };
 
             match self.risk_checker.check(&risk_check_req) {
@@ -891,7 +989,26 @@ impl OrderRouter {
         results: Vec<Result<Success, Failed>>,
     ) -> Result<(), ExchangeError> {
         let mut handled_accepted = false;
-        let mut handled_trade = false; // 是否已处理成交事件（Filled/PartiallyFilled）
+        // ✨ 记住 taker 自己的 engine_id,用它判别每个成交事件归属 @yutiansut @quantaxis
+        //
+        // 原先这里是 `handled_trade: bool` —— 一次性标志,只把**第一个**成交事件
+        // 当作 taker,其余全部当 maker。但一张扫多档的单会产生多组事件,
+        // qars2 的顺序是「主动方、对手方、主动方、对手方…」
+        // (qars2 orderbook.rs:1103/1113 与 :1145/:1157 两分支都是先 taker 后 maker):
+        //
+        //   [0] PartiallyFilled{taker, v1}   → 记为 taker  ✓
+        //   [1] Filled{maker1,   v1}         → 记为 maker  ✓
+        //   [2] PartiallyFilled{taker, v2}   → 记为 maker  ✗ 这是 taker 自己
+        //   [3] Filled{maker2,   v2}         → 记为 maker  ✓
+        //   [4] Filled{taker,    v3}         → 记为 maker  ✗
+        //
+        // 后果:扫 N 档的单只有第 1 笔进 TradeRecorder。实测全市场
+        // TradeRecorder 12730 腿 / QIFI 25632 条 = **49.7%**,正好丢一半
+        // (平均扫 2 档)。
+        //
+        // 正确判别:成交事件的 match_order_id == taker 自己的 engine_id。
+        // 首个成交事件必定属于 taker(见上面的发射顺序),由它确定该 id。
+        let mut taker_engine_id: Option<u64> = None;
 
         log::debug!(
             "🔍 process_matching_results: order_id={}, user_id={}, results_count={}",
@@ -936,8 +1053,17 @@ impl OrderRouter {
                             // qars 会返回两个事件：新订单成交 + 对手单成交
                             // 我们需要更新对手单的状态（如果它属于我们管理的订单）
 
-                            if !handled_trade {
-                                // 第一个事件：新订单的成交（taker - 主动方）
+                            // ✨ 按 engine_id 判别归属,而不是「是不是第一个」 @yutiansut @quantaxis
+                            let is_taker_event = match taker_engine_id {
+                                None => {
+                                    taker_engine_id = Some(match_order_id);
+                                    true
+                                }
+                                Some(tid) => match_order_id == tid,
+                            };
+
+                            if is_taker_event {
+                                // 新订单(taker - 主动方)的成交,可能有多笔(扫多档)
                                 log::debug!(
                                     "🔍     Processing TAKER order trade: order_id={}, opposite={}",
                                     match_order_id,
@@ -945,7 +1071,6 @@ impl OrderRouter {
                                 );
                                 // ✨ is_taker=true: 主动方，记录成交到 TradeRecorder @yutiansut @quantaxis
                                 self.handle_success_result(order_id, order, success.clone(), true)?;
-                                handled_trade = true;
                             } else {
                                 // 第二个事件：对手单（挂单方）的成交
                                 // qars 返回的第二个 Filled 事件中：
@@ -957,7 +1082,10 @@ impl OrderRouter {
                                 // ✨ 关键修复：使用 match_order_id（对手单的engine_id）查找对手单的 order_id
                                 // 之前的 BUG：使用 opposite_order_id 查找，导致找到的是已处理的新订单
                                 // @yutiansut @quantaxis
-                                if let Some(maker_order_id_str) = self.engine_id_to_order.get(&match_order_id) {
+                                if let Some(maker_order_id_str) = self
+                                    .engine_id_to_order
+                                    .get(&(order.instrument_id.clone(), match_order_id))
+                                {
                                     let maker_order_str = maker_order_id_str.value().clone();
                                     log::debug!("🔍     Found maker order mapping: engine_id={} → order_id={}", match_order_id, maker_order_str);
 
@@ -1056,8 +1184,10 @@ impl OrderRouter {
 
                 // ✨ 存储反向映射: matching_engine_order_id → order_id / user_id @yutiansut @quantaxis
                 // 用于在成交时通过对手单的matching_engine_order_id找到对应的order_id和user_id
-                self.engine_id_to_order.insert(id, order_id.to_string());
-                self.engine_id_to_user.insert(id, order.user_id.clone()); // ✨ O(1) 直接映射
+                self.engine_id_to_order
+                    .insert((order.instrument_id.clone(), id), order_id.to_string());
+                self.engine_id_to_user
+                    .insert((order.instrument_id.clone(), id), order.user_id.clone());
                 log::debug!("💾 Stored reverse mapping: engine_id={} → order_id={}, user_id={}", id, order_id, order.user_id);
 
                 // Phase 6: 使用新的 handle_order_accepted_new (交易所只推送ACCEPTED回报)
@@ -1128,35 +1258,47 @@ impl OrderRouter {
                     let mut info = order_info.write();
                     info.status = OrderStatus::Filled;
                     info.update_time = ts;
-                    info.filled_volume = volume;
+                    // ✨ 必须累加,不能赋值 @yutiansut @quantaxis
+                    //
+                    // qars2 的 Success::Filled / PartiallyFilled 里的 volume 都是
+                    // **本次撮合**的成交量,不是累计量
+                    // (qars2/src/qamarket/matchengine/orderbook.rs:1099-1174 —— 两个分支
+                    //  发出的 volume 分别是 `volume`(来单剩余) 和 `opposite_order.volume`,
+                    //  都是单次撮合量)。
+                    //
+                    // 一张 10 手的单吃掉 3 档 (4+3+3) 会依次收到
+                    //   PartiallyFilled{4} → PartiallyFilled{3} → Filled{3}
+                    // 原先终态用 `=` 会把前两笔累计的 7 手抹掉,filled_volume 变成 3。
+                    info.filled_volume += volume;
                 }
 
                 // 更新成交统计
                 self.update_trade_stats(price, volume);
 
-                // 广播Tick成交数据
-                if let Some(ref broadcaster) = self.market_broadcaster {
-                    let direction_str = if order.direction == "BUY" {
-                        "buy"
-                    } else {
-                        "sell"
-                    };
-                    broadcaster.broadcast_tick(
-                        order.instrument_id.clone(),
-                        price,
-                        volume,
-                        direction_str.to_string(),
-                    );
+                // 行情副作用只在 taker 侧做 @yutiansut @quantaxis
+                //
+                // 一笔撮合是**一个**市场事件,但 qars2 会为买卖双方各发一个 Success
+                // 事件,qaexchange 对 taker 和 maker 都调 handle_success_result
+                // (:947 传 true / :973 传 false),于是下面这些广播和落盘全部跑两遍。
+                // 叠加 trade_gateway.rs 里 mds 那一组(同样跑两遍),
+                // 每笔成交一共产生 4 个 MarketDataEvent::Tick,
+                // 而 KLineActor 对每个 Tick 无条件累加 volume
+                // (kline_actor.rs:417) → K线成交量约 4 倍。
+                if is_taker {
+                    // ✨ 不在这里广播 Tick @yutiansut @quantaxis
+                    // Tick 的唯一广播点是 MarketDataService::on_trade —— 它才是
+                    // 行情摄入入口,且有单测锁定该契约。这里再广播一次会让
+                    // 每笔成交重复计入 K线 volume。最新价仍从这里发(不进 K线聚合)。
+                    if let Some(ref broadcaster) = self.market_broadcaster {
+                        broadcaster.broadcast_last_price(order.instrument_id.clone(), price);
+                    }
 
-                    // 同时广播最新价
-                    broadcaster.broadcast_last_price(order.instrument_id.clone(), price);
+                    // 持久化Tick数据到WAL
+                    self.persist_tick_data(&order.instrument_id, price, volume)?;
+
+                    // 持久化订单簿快照（订单成交后订单簿发生变化）
+                    self.persist_orderbook_snapshot(&order.instrument_id)?;
                 }
-
-                // 持久化Tick数据到WAL
-                self.persist_tick_data(&order.instrument_id, price, volume)?;
-
-                // 持久化订单簿快照（订单成交后订单簿发生变化）
-                self.persist_orderbook_snapshot(&order.instrument_id)?;
 
                 // 获取 qars 订单ID
                 let qa_order_id = if let Some(order_info) = self.orders.get(order_id) {
@@ -1170,13 +1312,13 @@ impl OrderRouter {
                 // 性能优化：避免两次DashMap查找 + 一次RwLock读取
                 let opposite_user_id: Option<String> = self
                     .engine_id_to_user
-                    .get(&opposite_order_id)
+                    .get(&(order.instrument_id.clone(), opposite_order_id))
                     .map(|v| v.value().clone());
 
                 // ✨ O(1) 查找对手方的真实订单ID @yutiansut @quantaxis
                 let opposite_order_id_str: Option<String> = self
                     .engine_id_to_order
-                    .get(&opposite_order_id)
+                    .get(&(order.instrument_id.clone(), opposite_order_id))
                     .map(|v| v.value().clone());
 
                 log::debug!(
@@ -1247,29 +1389,30 @@ impl OrderRouter {
                 // 更新成交统计
                 self.update_trade_stats(price, volume);
 
-                // 广播Tick成交数据
-                if let Some(ref broadcaster) = self.market_broadcaster {
-                    let direction_str = if order.direction == "BUY" {
-                        "buy"
-                    } else {
-                        "sell"
-                    };
-                    broadcaster.broadcast_tick(
-                        order.instrument_id.clone(),
-                        price,
-                        volume,
-                        direction_str.to_string(),
-                    );
+                // 行情副作用只在 taker 侧做 @yutiansut @quantaxis
+                //
+                // 一笔撮合是**一个**市场事件,但 qars2 会为买卖双方各发一个 Success
+                // 事件,qaexchange 对 taker 和 maker 都调 handle_success_result
+                // (:947 传 true / :973 传 false),于是下面这些广播和落盘全部跑两遍。
+                // 叠加 trade_gateway.rs 里 mds 那一组(同样跑两遍),
+                // 每笔成交一共产生 4 个 MarketDataEvent::Tick,
+                // 而 KLineActor 对每个 Tick 无条件累加 volume
+                // (kline_actor.rs:417) → K线成交量约 4 倍。
+                if is_taker {
+                    // ✨ 不在这里广播 Tick @yutiansut @quantaxis
+                    // Tick 的唯一广播点是 MarketDataService::on_trade —— 它才是
+                    // 行情摄入入口,且有单测锁定该契约。这里再广播一次会让
+                    // 每笔成交重复计入 K线 volume。最新价仍从这里发(不进 K线聚合)。
+                    if let Some(ref broadcaster) = self.market_broadcaster {
+                        broadcaster.broadcast_last_price(order.instrument_id.clone(), price);
+                    }
 
-                    // 同时广播最新价
-                    broadcaster.broadcast_last_price(order.instrument_id.clone(), price);
+                    // 持久化Tick数据到WAL
+                    self.persist_tick_data(&order.instrument_id, price, volume)?;
+
+                    // 持久化订单簿快照（订单成交后订单簿发生变化）
+                    self.persist_orderbook_snapshot(&order.instrument_id)?;
                 }
-
-                // 持久化Tick数据到WAL
-                self.persist_tick_data(&order.instrument_id, price, volume)?;
-
-                // 持久化订单簿快照（订单成交后订单簿发生变化）
-                self.persist_orderbook_snapshot(&order.instrument_id)?;
 
                 // 获取 qars 订单ID
                 let qa_order_id = if let Some(order_info) = self.orders.get(order_id) {
@@ -1283,13 +1426,13 @@ impl OrderRouter {
                 // 性能优化：避免两次DashMap查找 + 一次RwLock读取
                 let opposite_user_id: Option<String> = self
                     .engine_id_to_user
-                    .get(&opposite_order_id)
+                    .get(&(order.instrument_id.clone(), opposite_order_id))
                     .map(|v| v.value().clone());
 
                 // ✨ O(1) 查找对手方的真实订单ID @yutiansut @quantaxis
                 let opposite_order_id_str: Option<String> = self
                     .engine_id_to_order
-                    .get(&opposite_order_id)
+                    .get(&(order.instrument_id.clone(), opposite_order_id))
                     .map(|v| v.value().clone());
 
                 log::debug!(
@@ -1781,16 +1924,51 @@ impl OrderRouter {
         0.0
     }
 
+    /// 开平标志归一化 —— 把各处的写法收敛到一套规范值
+    ///
+    /// 项目里同一个概念有三套拼写(实测 2026-09-04):
+    ///   前端表单 + `protocol/diff/types.rs:439`  → `CLOSE_TODAY` / `CLOSE_YESTERDAY`
+    ///   `order_router::calculate_towards`        → `CLOSETODAY`(无平昨分支)
+    ///   `risk/pre_trade_check.rs:348`            → `CLOSETODAY` / `CLOSEYESTERDAY`
+    /// 这里统一收到**无下划线**的规范形(与 pre_trade_check 一致),
+    /// 同时接受带下划线的写法以兼容既有前端。
+    /// 返回 `None` 表示非法 —— 调用方必须拒单,**不得**回退到任何默认方向。
+    /// @yutiansut @quantaxis
+    fn normalize_offset(offset: &str) -> Option<&'static str> {
+        match offset.trim().to_ascii_uppercase().as_str() {
+            "OPEN" => Some("OPEN"),
+            "CLOSE" => Some("CLOSE"),
+            "CLOSETODAY" | "CLOSE_TODAY" => Some("CLOSETODAY"),
+            "CLOSEYESTERDAY" | "CLOSE_YESTERDAY" => Some("CLOSEYESTERDAY"),
+            _ => None,
+        }
+    }
+
     /// 计算 towards (买卖方向 - 遵循 qars 定义)
+    ///
+    /// ⚠️ **不设默认分支**。原来是 `_ => 2`(默认买开)——
+    /// 任何拼写不对的 offset 都会被静默做成买入开仓,方向直接做反。
+    /// 入口 `submit_order_with_options` 已用 `normalize_offset` 把 offset
+    /// 收敛并拒掉非法值,这里只需覆盖四个规范值;真出现意外组合时
+    /// 记 error 日志并返回买开(保持函数签名不变),但那已是不可达路径。
     fn calculate_towards(&self, direction: &str, offset: &str) -> i32 {
         match (direction, offset) {
             ("BUY", "OPEN") => 2,    // 买开 = 2 (qars 标准)
             ("SELL", "OPEN") => -2,  // 卖开 = -2
             ("BUY", "CLOSE") => 3,   // 买平 = 3
-            ("SELL", "CLOSE") => -3, // 卖平 = -3 ✅
+            ("SELL", "CLOSE") => -3, // 卖平 = -3
+            ("BUY", "CLOSEYESTERDAY") => 3,   // 平昨 = 普通平仓(qars 平昨优先)
+            ("SELL", "CLOSEYESTERDAY") => -3,
             ("BUY", "CLOSETODAY") => 4,
             ("SELL", "CLOSETODAY") => -4,
-            _ => 2, // 默认买开
+            _ => {
+                log::error!(
+                    "calculate_towards 收到未归一化的组合 direction={:?} offset={:?} —— \
+                     入口归一化被绕过,请检查调用路径",
+                    direction, offset
+                );
+                2
+            }
         }
     }
 
@@ -2318,8 +2496,10 @@ impl OrderRouter {
                                 matching_engine_order_id = Some(id);
 
                                 // ✨ 存储反向映射 @yutiansut @quantaxis
-                                self.engine_id_to_order.insert(id, order_id.clone());
-                                self.engine_id_to_user.insert(id, order.user_id.clone());
+                                self.engine_id_to_order
+                                    .insert((order.instrument_id.clone(), id), order_id.clone());
+                                self.engine_id_to_user
+                                    .insert((order.instrument_id.clone(), id), order.user_id.clone());
 
                                 orderbook_restored_count += 1;
                                 log::info!(

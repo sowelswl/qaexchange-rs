@@ -505,7 +505,21 @@ mod tests {
     fn test_kline_aggregator() {
         let mut agg = KLineAggregator::new("IF2501".to_string());
 
-        let now = chrono::Utc::now().timestamp_millis();
+        // ✨ 用固定的分钟起点,不能用 Utc::now() @yutiansut @quantaxis
+        //
+        // 本测试断言「+10 秒不应完成分钟K线」。原来以 `Utc::now()` 为基准,
+        // 当运行时刻落在某分钟的第 50–59 秒时,+10 秒必然跨过分钟边界,
+        // 分钟K线**确实**会完成 —— 断言失败。命中率约 1/6,且完全取决于
+        // 跑测试的墙上时间。
+        //
+        // 实测(连跑三次,间隔 20 秒):
+        //   00:21:47 ok    (47+10=57,不跨分钟)
+        //   00:22:34 ok    (34+10=44,不跨分钟)
+        //   00:22:55 FAIL  (55+10=65,跨分钟)
+        //
+        // 这类「有时过有时不过」的测试比不写更有害:它会被误判成回归,
+        // 也会掩盖真正的回归。改为对齐到分钟起点,使断言恒定成立。
+        let now = (chrono::Utc::now().timestamp_millis() / 60_000) * 60_000;
 
         // 第一个tick
         let finished = agg.on_tick(3800.0, 10, now);
@@ -535,7 +549,10 @@ mod tests {
     fn test_kline_manager() {
         let manager = KLineManager::new();
 
-        let now = chrono::Utc::now().timestamp_millis();
+        // ✨ 同样对齐到分钟起点 —— 见上方 test_kline_aggregator 的说明。
+        // 注意 :570/:601/:662 本来就是对齐的,说明作者知道要这么做,
+        // 只是漏了这两处。@yutiansut @quantaxis
+        let now = (chrono::Utc::now().timestamp_millis() / 60_000) * 60_000;
 
         manager.on_tick("IF2501", 3800.0, 10, now);
         manager.on_tick("IF2501", 3810.0, 5, now + 10000);

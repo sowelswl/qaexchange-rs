@@ -239,17 +239,33 @@ impl MarketSnapshotGenerator {
     /// 返回后台线程句柄
     pub fn start(self: Arc<Self>) -> std::thread::JoinHandle<()> {
         let interval = Duration::from_millis(self.config.interval_ms);
-        let instruments = self.config.instruments.clone();
+        // 兜底列表：仅在撮合引擎尚未注册任何合约时使用 @yutiansut @quantaxis
+        let seed_instruments = self.config.instruments.clone();
 
         std::thread::spawn(move || {
             log::info!(
-                "Market snapshot generator started (interval: {}ms, instruments: {})",
+                "Market snapshot generator started (interval: {}ms, seed instruments: {})",
                 self.config.interval_ms,
-                instruments.len()
+                seed_instruments.len()
             );
 
             loop {
                 std::thread::sleep(interval);
+
+                // 每轮从撮合引擎重读合约表 @yutiansut @quantaxis
+                //
+                // 原实现在 start() 时 clone 了 config.instruments 进闭包，此后永久冻结：
+                // 通过 /api/admin/instrument/create 新增的合约永远拿不到快照，
+                // 前端行情、涨跌幅、快照广播全都看不到它。
+                // 撮合引擎的 orderbooks 才是「哪些合约存在」的唯一真相源。
+                let instruments = {
+                    let live = self.matching_engine.get_instruments();
+                    if live.is_empty() {
+                        seed_instruments.clone()
+                    } else {
+                        live
+                    }
+                };
 
                 // 为每个合约生成快照
                 for instrument_id in &instruments {

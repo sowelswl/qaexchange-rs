@@ -274,7 +274,13 @@ impl WsMessageHandler {
                 Ok(account) => {
                     // ✨ 使用 write() 以便调用 get_margin() 动态计算 @yutiansut @quantaxis
                     let mut acc = account.write();
-                    let frozen = acc.accounts.balance - acc.money;
+                            // ⚠️ `acc.accounts.<派生字段>` 盘中**永远是开户时的初始值** ——
+                    // qars 只在 `settle()` 里整体重建 self.accounts(account.rs:574),
+                    // 成交/撤单都不回写。实测 NOISE_SELL 成交 6.8 万笔后
+                    // accounts.balance 仍是 1,500,000,000(init_cash)、risk_ratio 仍是 0.0。
+                    // 本处已持写锁(为 get_margin 取的),改用动态 getter 零额外成本。
+                    // @yutiansut @quantaxis
+                    let frozen = acc.get_balance() - acc.money;
                     // ✨ 保证金 = 持仓保证金 + 冻结保证金（待成交订单）@yutiansut @quantaxis
                     let position_margin = acc.get_margin();
                     let frozen_margin = acc.get_frozen_margin();
@@ -282,12 +288,12 @@ impl WsMessageHandler {
                     let data = serde_json::json!({
                         "account": {
                             "user_id": acc.account_cookie,
-                            "balance": acc.accounts.balance,
+                            "balance": acc.get_balance(),
                             "available": acc.money,
                             "frozen": frozen,
                             "margin": margin,  // ✨ 使用动态计算的值
-                            "profit": acc.accounts.close_profit,
-                            "risk_ratio": acc.accounts.risk_ratio,
+                            "profit": acc.get_closeprofit(),
+                            "risk_ratio": acc.get_riskratio(),
                         }
                     });
 

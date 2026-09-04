@@ -605,7 +605,7 @@ impl TradeGateway {
             volume,
             time: timestamp,
             internal_order_id: WalRecord::to_fixed_array_32(order_id),
-            user_id: WalRecord::to_fixed_array_32(user_id),
+            user_id: WalRecord::to_fixed_array_40(user_id),
         };
 
         // 获取或创建 instrument WAL manager
@@ -621,7 +621,7 @@ impl TradeGateway {
             response_type: 0, // 0=OrderAccepted
             exchange_order_id,
             instrument: WalRecord::to_fixed_array_16(instrument_id),
-            user_id: WalRecord::to_fixed_array_32(user_id),
+            user_id: WalRecord::to_fixed_array_40(user_id),
             timestamp,
             trade_id: 0,        // N/A for OrderAccepted
             volume: 0.0,        // N/A
@@ -851,7 +851,7 @@ impl TradeGateway {
             response_type: 2, // 2=Trade
             exchange_order_id,
             instrument: WalRecord::to_fixed_array_16(instrument_id),
-            user_id: WalRecord::to_fixed_array_32(user_id),
+            user_id: WalRecord::to_fixed_array_40(user_id),
             timestamp,
             trade_id,
             volume,
@@ -916,6 +916,11 @@ impl TradeGateway {
                     price,
                     volume,
                     trading_day,
+                    // 用 qars 的权威公式,不复制费率 —— `preset` 里带 unit_table,
+                    // 手写 `price * volume * rate` 必然漏合约乘数。@yutiansut @quantaxis
+                    qars::qaaccount::marketpreset::MarketPreset::global()
+                        .get(instrument_id)
+                        .calc_commission(price, volume),
                 );
             }
         } else {
@@ -923,16 +928,20 @@ impl TradeGateway {
         }
 
         // 更新快照生成器的成交统计
+        // ✨ 只在 taker 侧做:本函数对买卖双方各调用一次,不设门会双计 @yutiansut @quantaxis
+        if is_taker {
         if let Some(mds) = &self.market_data_service {
             let turnover = price * volume;
             mds.update_trade_stats(instrument_id, volume as i64, turnover);
-            mds.on_trade(instrument_id, price, volume as i64);
+            let dir_str = if direction.eq_ignore_ascii_case("BUY") { "buy" } else { "sell" };
+            mds.on_trade(instrument_id, price, volume as i64, dir_str);
             log::trace!(
                 "Updated snapshot stats: {} volume={}, turnover={:.2}",
                 instrument_id,
                 volume,
                 turnover
             );
+        }
         }
 
         // ✨ 关键修复：调用receive_deal_sim更新账户持仓和资金 @yutiansut @quantaxis
@@ -1300,11 +1309,32 @@ impl TradeGateway {
             log::debug!("🔧   BEFORE order.trade(): order_id={}, volume_left={}, volume_orign={}, status={}",
                 qa_order_id, order.volume_left, order.volume_orign, order.status);
 
-            // 调用订单的 trade() 方法，自动更新 volume_left
-            // qars 的 trade() 方法会：
-            // 1. volume_left -= amount
-            // 2. if volume_left == 0.0 { status = "FINISHED" }
-            order.trade(volume);
+            // ✨ 这里**不能**再调 order.trade() @yutiansut @quantaxis
+            //
+            // `receive_deal_sim`(上方几行)内部已经调过了 ——
+            // qars2/src/qaaccount/account.rs:1656-1657:
+            //     let order = self.dailyorders.get_mut(&order_id).unwrap();
+            //     order.trade(amount);
+            //
+            // 在这里再调一次 → volume_left 被扣两次:
+            //     receive_deal_sim  volume_left: 2 → 0
+            //     这里              volume_left: 0 → -2
+            //
+            // 后果:`volume_left` 变成 `-volume_orign`,而恢复路径按
+            //     filled_volume = volume_orign - volume_left
+            // 计算(order_router.rs:2359),得到 2 - (-2) = 4 ——
+            // **已成交量恰好翻倍**,前端「当前委托」里就显示成
+            // 「委托 3 手 / 成交 6 手」。
+            //
+            // 实测(生产 19,785 笔订单):成交量 > 委托量 的 880 笔,
+            // 全部是重启恢复的历史单,且成交量精确等于委托量 ×2;
+            // 抽查某账户 QIFI:3849 笔里 3847 笔 `volume_left == -volume_orign`。
+            //
+            // 原注释「qars 的 trade() 方法会…」说明当时并不知道
+            // receive_deal_sim 已经做过这件事 —— 同一件事写了两遍,
+            // 而这次两遍分别在两个代码库里(参见 tasks/lessons.md L13)。
+            //
+            // 状态与 volume_left 直接读 receive_deal_sim 处理后的结果。
 
             log::debug!(
                 "🔧   AFTER order.trade(): order_id={}, volume_left={}, status={}",
@@ -1426,7 +1456,7 @@ impl TradeGateway {
 
         let record = WalRecord::OrderStatusUpdate {
             order_id: WalRecord::to_fixed_array_64(order_id),
-            user_id: WalRecord::to_fixed_array_32(user_id),
+            user_id: WalRecord::to_fixed_array_40(user_id),
             instrument_id: WalRecord::to_fixed_array_16(instrument_id),
             status,
             volume_orign,
@@ -1499,7 +1529,7 @@ impl TradeGateway {
         let timestamp = Utc::now().timestamp_nanos_opt().unwrap_or(0);
 
         let record = WalRecord::PositionSnapshot {
-            user_id: WalRecord::to_fixed_array_32(user_id),
+            user_id: WalRecord::to_fixed_array_40(user_id),
             instrument_id: WalRecord::to_fixed_array_16(instrument_id),
             exchange_id: WalRecord::to_fixed_array_16(exchange_id),
             volume_long_today,
@@ -1593,11 +1623,17 @@ impl TradeGateway {
 
         let notification = AccountUpdateNotification {
             user_id: account_id.to_string(), // ✨ 使用 account_id @yutiansut @quantaxis
-            balance: acc.accounts.balance,
+            // ⚠️ `acc.accounts.<派生字段>` 盘中**永远是开户时的初始值** ——
+            // qars 只在 `settle()` 里整体重建 self.accounts(account.rs:574),
+            // 成交/撤单都不回写。实测 NOISE_SELL 成交 6.8 万笔后
+            // accounts.balance 仍是 1,500,000,000(init_cash)、risk_ratio 仍是 0.0。
+            // 本处已持写锁(为 get_margin 取的),改用动态 getter 零额外成本。
+            // @yutiansut @quantaxis
+            balance: acc.get_balance(),
             available: acc.money,
             margin,  // ✨ 修复: 使用动态计算的 margin
-            position_profit: acc.accounts.position_profit,
-            risk_ratio: acc.accounts.risk_ratio,
+            position_profit: acc.get_positionprofit(),
+            risk_ratio: acc.get_riskratio(),
             timestamp: Utc::now().timestamp_nanos_opt().unwrap_or(0),
         };
 
@@ -1608,11 +1644,12 @@ impl TradeGateway {
             let patch = serde_json::json!({
                 "accounts": {
                     account_id: {  // ✨ 使用 account_id @yutiansut @quantaxis
-                        "balance": acc.accounts.balance,
+                        // 同上:盘中不可读 acc.accounts 的派生字段 @yutiansut @quantaxis
+                        "balance": acc.get_balance(),
                         "available": acc.money,
                         "margin": margin,  // ✨ 修复: 使用动态计算的 margin
-                        "position_profit": acc.accounts.position_profit,
-                        "risk_ratio": acc.accounts.risk_ratio,
+                        "position_profit": acc.get_positionprofit(),
+                        "risk_ratio": acc.get_riskratio(),
                     }
                 }
             });

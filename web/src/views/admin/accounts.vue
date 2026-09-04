@@ -50,6 +50,10 @@
 
     <!-- 账户列表 @yutiansut @quantaxis -->
     <div class="table-container">
+      <!-- ✨ 表格高度改为跟随视口, 不再写死 500px @yutiansut @quantaxis
+           实测 1366x768: 上方 316px + 底部分页 52px; 原 500px 令表格底部溢出 124px
+           var(--qa-content-h) 由 layout/index.vue 统一定义 = 100vh - 56(顶栏) - 40(padding),
+           有公告条时自动再减 40px; max(260px, ...) 是极短视口下的兜底 -->
       <el-table
         ref="accountTable"
         :data="accounts"
@@ -57,44 +61,44 @@
         stripe
         highlight-current-row
         v-loading="loading"
-        height="500"
+        :height="'max(260px, calc(var(--qa-content-h, calc(100vh - 96px)) - 368px))'"
         style="width: 100%"
       >
-        <el-table-column prop="account_id" label="账户ID" width="200" sortable show-overflow-tooltip></el-table-column>
-        <el-table-column prop="user_id" label="用户ID" width="200" sortable show-overflow-tooltip></el-table-column>
-        <el-table-column prop="account_name" label="账户名称" width="150"></el-table-column>
-        <el-table-column prop="account_type" label="账户类型" width="120">
+        <el-table-column prop="account_id" label="账户ID" min-width="200" sortable show-overflow-tooltip></el-table-column>
+        <el-table-column prop="owner_user_id" label="所属用户" min-width="150" sortable show-overflow-tooltip></el-table-column>
+        <el-table-column prop="account_name" label="账户名称" min-width="150"></el-table-column>
+        <el-table-column prop="account_type" label="账户类型" min-width="80">
           <template slot-scope="scope">
             <el-tag :type="scope.row.account_type === 'Individual' ? 'success' : 'warning'" size="small">
               {{ scope.row.account_type === 'Individual' ? '个人' : '机构' }}
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="balance" label="总权益" width="140" align="right">
+        <el-table-column prop="balance" label="总权益" min-width="140" align="right">
           <template slot-scope="scope">
             <span :class="{ 'positive': scope.row.balance > 0 }">
               {{ scope.row.balance.toLocaleString('zh-CN', { minimumFractionDigits: 2 }) }}
             </span>
           </template>
         </el-table-column>
-        <el-table-column prop="available" label="可用资金" width="140" align="right">
+        <el-table-column prop="available" label="可用资金" min-width="140" align="right">
           <template slot-scope="scope">
             {{ scope.row.available.toLocaleString('zh-CN', { minimumFractionDigits: 2 }) }}
           </template>
         </el-table-column>
-        <el-table-column prop="margin_used" label="占用保证金" width="140" align="right">
+        <el-table-column prop="margin_used" label="占用保证金" min-width="140" align="right">
           <template slot-scope="scope">
             {{ (scope.row.margin_used || 0).toLocaleString('zh-CN', { minimumFractionDigits: 2 }) }}
           </template>
         </el-table-column>
-        <el-table-column prop="risk_ratio" label="风险率" width="120" align="right">
+        <el-table-column prop="risk_ratio" label="风险率" min-width="90" align="right">
           <template slot-scope="scope">
             <el-tag :type="getRiskTagType(scope.row.risk_ratio)" size="small">
               {{ (scope.row.risk_ratio * 100).toFixed(2) }}%
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="created_at" label="创建时间" width="180">
+        <el-table-column prop="created_at" label="创建时间" min-width="140">
           <template slot-scope="scope">
             {{ formatTimestamp(scope.row.created_at) }}
           </template>
@@ -328,7 +332,11 @@ export default {
       return date.toLocaleString('zh-CN')
     },
     showAccountDetail(row) {
-      this.$router.push({ path: `/admin/account-detail/${row.user_id}` })
+      // 路由表里注册的是 `account/:accountId`(router/index.js:118),
+      // 没有 /admin/account-detail —— 原来跳这个路径直接白屏。
+      // 参数用 account_id(后端新补的正确字段名),row.user_id 里装的
+      // 其实也是 account_cookie,值一样但名字有歧义。@yutiansut @quantaxis
+      this.$router.push({ path: `/account/${row.account_id || row.user_id}` })
     },
     showDepositDialog(row) {
       this.depositForm = {

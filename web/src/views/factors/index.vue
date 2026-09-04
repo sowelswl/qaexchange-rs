@@ -144,7 +144,7 @@
                 stripe
                 max-height="300"
               >
-                <el-table-column prop="time" label="时间" width="100" />
+                <el-table-column prop="time" label="时间" min-width="100" />
                 <el-table-column prop="ma5" label="MA5" width="80">
                   <template slot-scope="{ row }">
                     {{ formatValue(row.ma5) }}

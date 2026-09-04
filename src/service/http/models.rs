@@ -310,6 +310,8 @@ pub struct SingleOrderRequest {
 /// 批量下单请求
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BatchOrderRequest {
+    /// 下单发起者 —— 用于校验 account_id 归属 @yutiansut @quantaxis
+    pub user_id: String,
     pub account_id: String,
     pub orders: Vec<SingleOrderRequest>,
 }
@@ -335,6 +337,8 @@ pub struct BatchOrderResponse {
 /// 批量撤单请求
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BatchCancelRequest {
+    /// 撤单发起者 —— 用于校验 account_id 归属 @yutiansut @quantaxis
+    pub user_id: String,
     pub account_id: String,
     pub order_ids: Vec<String>,
 }
@@ -409,7 +413,10 @@ pub struct CommissionRate {
 /// 手续费查询请求
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CommissionQueryRequest {
-    pub account_id: String,
+    /// 可选：handler 目前不使用该字段，费率是全局表；
+    /// 声明为必填会让「不带参数查全部费率」直接 400 @yutiansut @quantaxis
+    #[serde(default)]
+    pub account_id: Option<String>,
     pub instrument_id: Option<String>,   // 为空则查询全部
 }
 
@@ -450,7 +457,10 @@ pub struct MarginRate {
 /// 保证金率查询请求
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MarginRateQueryRequest {
-    pub account_id: String,
+    /// 可选：同 CommissionQueryRequest，handler 不使用该字段
+    /// @yutiansut @quantaxis
+    #[serde(default)]
+    pub account_id: Option<String>,
     pub instrument_id: Option<String>,
 }
 
@@ -648,6 +658,12 @@ pub struct CreateAnnouncementRequest {
     pub content: String,
     pub announcement_type: AnnouncementType,
     pub priority: AnnouncementPriority,
+    /// 失效时间(**毫秒**时间戳,与 account_admin.rs:104 `current_timestamp()` 同口径)
+    ///
+    /// ⚠️ 前端历来发的是 `effective_until`(admin/announcements.vue:285),
+    /// 后端没有 `deny_unknown_fields` → 静默丢弃 → **公告永不过期**。
+    /// 加 alias 兜底;前端也已改为直接用 `expire_time`。@yutiansut @quantaxis
+    #[serde(alias = "effective_until")]
     pub expire_time: Option<i64>,
     pub admin_token: String,
 }
@@ -656,6 +672,15 @@ pub struct CreateAnnouncementRequest {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AnnouncementQueryRequest {
     pub announcement_type: Option<AnnouncementType>,
+    /// 只看生效中的公告
+    ///
+    /// ⚠️ 前端 4 处调用发的是 `active_only`(login.vue:258、announcements/index.vue:128、
+    /// admin/announcements.vue:25 与 :191),与本字段名相反。后端没有
+    /// `deny_unknown_fields`,所以该参数**永远落空** → 走
+    /// `unwrap_or(true)`(account_admin.rs:804)→ 管理页的「全部状态」筛选
+    /// 和 `active_only: false` 都无效,永远只显示生效中的公告。
+    /// 用 serde alias 同时接受两种写法,不必改 4 处前端。@yutiansut @quantaxis
+    #[serde(alias = "active_only")]
     pub only_active: Option<bool>,
     pub page: Option<u32>,
     pub page_size: Option<u32>,

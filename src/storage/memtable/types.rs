@@ -181,7 +181,7 @@ mod tests {
     fn test_entry_from_wal() {
         let record = WalRecord::OrderInsert {
             order_id: 1,
-            user_id: [1u8; 32],
+            user_id: [1u8; 40],
             instrument_id: [1u8; 16],
             direction: 0,
             offset: 0,

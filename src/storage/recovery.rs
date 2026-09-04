@@ -33,15 +33,23 @@ use std::sync::Arc;
 
 /// WAL恢复管理器
 pub struct RecoveryManager {
-    /// WAL目录路径
-    wal_dir: String,
+    /// 存储根目录（**不是** WAL 目录）@yutiansut @quantaxis
+    ///
+    /// 账户 WAL 的真实位置是 `{storage_base}/__ACCOUNT__/wal`，由
+    /// `OltpHybridStorage::create` 写出（`hybrid/oltp.rs:112` join instrument_id,
+    /// `:117` join "wal"）。此前这里叫 `wal_dir` 且由 main.rs 传入
+    /// `{storage_base}/wal`，拼出来是 `{storage_base}/wal/__ACCOUNT__` ——
+    /// 两段顺序颠倒，该目录从不存在，账户 WAL 恢复永久空转。
+    storage_base: String,
 }
 
 impl RecoveryManager {
     /// 创建恢复管理器
-    pub fn new(wal_dir: impl Into<String>) -> Self {
+    ///
+    /// `storage_base` 是存储根目录，例如 `.../output/qaexchange/storage`。
+    pub fn new(storage_base: impl Into<String>) -> Self {
         Self {
-            wal_dir: wal_dir.into(),
+            storage_base: storage_base.into(),
         }
     }
 
@@ -54,7 +62,7 @@ impl RecoveryManager {
     /// - `Ok(count)`: 恢复的账户数量
     /// - `Err(e)`: 恢复失败
     pub fn recover(&self, account_mgr: &AccountManager) -> Result<usize, ExchangeError> {
-        let account_wal_dir = format!("{}/__ACCOUNT__", self.wal_dir);
+        let account_wal_dir = format!("{}/__ACCOUNT__/wal", self.storage_base);
         let wal_path = Path::new(&account_wal_dir);
 
         if !wal_path.exists() {
@@ -340,6 +348,6 @@ mod tests {
     #[test]
     fn test_recovery_manager_creation() {
         let recovery = RecoveryManager::new("/tmp/wal_test");
-        assert_eq!(recovery.wal_dir, "/tmp/wal_test");
+        assert_eq!(recovery.storage_base, "/tmp/wal_test");
     }
 }

@@ -8,49 +8,53 @@
 
     <!-- 合约列表 -->
     <div class="table-container">
+      <!-- ✨ 表格高度改为跟随视口, 不再写死 600px @yutiansut @quantaxis
+           实测 1366x768: 表格上沿距内容区顶部 93px
+           var(--qa-content-h) 由 layout/index.vue 统一定义 = 100vh - 56(顶栏) - 40(padding),
+           有公告条时自动再减 40px; max(260px, ...) 是极短视口下的兜底 -->
       <el-table
         ref="instrumentTable"
         :data="instruments"
         border
         stripe
         v-loading="loading"
-        height="600"
+        :height="'max(260px, calc(var(--qa-content-h, calc(100vh - 96px)) - 93px))'"
       >
-        <el-table-column prop="instrument_id" label="合约代码" width="120" sortable></el-table-column>
-        <el-table-column prop="instrument_name" label="合约名称" width="150"></el-table-column>
-        <el-table-column prop="instrument_type" label="类型" width="100" sortable>
+        <el-table-column prop="instrument_id" label="合约代码" min-width="120" sortable show-overflow-tooltip></el-table-column>
+        <el-table-column prop="instrument_name" label="合约名称" min-width="195"></el-table-column>
+        <el-table-column prop="instrument_type" label="类型" min-width="80" sortable>
           <template slot-scope="scope">
             <el-tag :type="getTypeTagType(scope.row.instrument_type)" size="small">
               {{ getTypeName(scope.row.instrument_type) }}
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="exchange" label="交易所" width="100"></el-table-column>
-        <el-table-column prop="contract_multiplier" label="合约乘数" width="100" align="right"></el-table-column>
-        <el-table-column prop="price_tick" label="最小变动价位" width="120" align="right">
+        <el-table-column prop="exchange" label="交易所" min-width="70"></el-table-column>
+        <el-table-column prop="contract_multiplier" label="合约乘数" min-width="100" align="right"></el-table-column>
+        <el-table-column prop="price_tick" label="最小变动价位" min-width="120" align="right">
           <template slot-scope="scope">
             {{ scope.row.price_tick.toFixed(2) }}
           </template>
         </el-table-column>
-        <el-table-column prop="margin_rate" label="保证金率" width="100" align="right">
+        <el-table-column prop="margin_rate" label="保证金率" min-width="100" align="right">
           <template slot-scope="scope">
             {{ (scope.row.margin_rate * 100).toFixed(1) }}%
           </template>
         </el-table-column>
-        <el-table-column prop="commission_rate" label="手续费率" width="100" align="right">
+        <el-table-column prop="commission_rate" label="手续费率" min-width="100" align="right">
           <template slot-scope="scope">
             {{ (scope.row.commission_rate * 100).toFixed(2) }}%
           </template>
         </el-table-column>
-        <el-table-column prop="status" label="状态" width="100" sortable>
+        <el-table-column prop="status" label="状态" min-width="70" sortable>
           <template slot-scope="scope">
             <el-tag :type="getStatusTagType(scope.row.status)" size="small">
               {{ getStatusName(scope.row.status) }}
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="list_date" label="上市日期" width="120"></el-table-column>
-        <el-table-column prop="expire_date" label="到期日期" width="120"></el-table-column>
+        <el-table-column prop="list_date" label="上市日期" min-width="95"></el-table-column>
+        <el-table-column prop="expire_date" label="到期日期" min-width="95"></el-table-column>
         <el-table-column label="操作" width="200" fixed="right">
           <template slot-scope="scope">
             <el-button size="mini" type="text" @click="showEditDialog(scope.row)">编辑</el-button>
@@ -140,6 +144,21 @@
             :precision="2"
             controls-position="right"
           ></el-input-number>
+        </el-form-item>
+
+        <!-- 上市初始价：订单簿基准价 / 初始结算价 / 昨收盘价 @yutiansut @quantaxis -->
+        <el-form-item label="上市初始价" prop="init_price">
+          <el-input-number
+            v-model="form.init_price"
+            :min="0.01"
+            :step="1"
+            :precision="2"
+            :disabled="isEdit"
+            controls-position="right"
+          ></el-input-number>
+          <span style="margin-left: 10px; color: #909399;">
+            {{ isEdit ? '已上市合约不可修改基准价' : '订单簿基准价 / 初始结算价 / 昨收盘价' }}
+          </span>
         </el-form-item>
 
         <el-form-item label="保证金率" prop="margin_rate">
@@ -243,6 +262,7 @@ export default {
         exchange: 'CFFEX',
         contract_multiplier: 300,
         price_tick: 0.2,
+        init_price: 3000,
         margin_rate: 0.12,
         commission_rate: 0.0001,
         limit_up_rate: 0.1,
@@ -253,6 +273,9 @@ export default {
       rules: {
         instrument_id: [
           { required: true, message: '请输入合约代码', trigger: 'blur' }
+        ],
+        init_price: [
+          { required: true, message: '请输入上市初始价', trigger: 'blur' }
         ],
         instrument_name: [
           { required: true, message: '请输入合约名称', trigger: 'blur' }
@@ -279,13 +302,9 @@ export default {
     async loadInstruments() {
       this.loading = true
       try {
-        const response = await getAllInstruments()
-        if (response.data && response.data.success) {
-          this.instruments = response.data.data || []
-        } else {
-          const errorMsg = (response.data && response.data.error && response.data.error.message) || '加载合约列表失败'
-          this.$message.error(errorMsg)
-        }
+        // request 拦截器已解包 { success, data, error }，这里直接拿到合约数组
+        const instruments = await getAllInstruments()
+        this.instruments = instruments || []
       } catch (error) {
         this.$message.error('加载合约列表失败')
         console.error(error)
@@ -317,6 +336,7 @@ export default {
         exchange: 'CFFEX',
         contract_multiplier: 300,
         price_tick: 0.2,
+        init_price: 3000,
         margin_rate: 0.12,
         commission_rate: 0.0001,
         limit_up_rate: 0.1,
@@ -336,22 +356,16 @@ export default {
 
         this.submitting = true
         try {
-          let response
+          // request 拦截器已解包：失败会 reject 到 catch，走到这里即成功
           if (this.isEdit) {
-            response = await updateInstrument(this.form.instrument_id, this.form)
+            await updateInstrument(this.form.instrument_id, this.form)
           } else {
-            response = await createInstrument(this.form)
+            await createInstrument(this.form)
           }
 
-          if (response.data && response.data.success) {
-            this.$message.success(this.isEdit ? '合约更新成功' : '合约上市成功')
-            this.dialogVisible = false
-            this.loadInstruments()
-          } else {
-            const defaultMsg = this.isEdit ? '合约更新失败' : '合约上市失败'
-            const errorMsg = (response.data && response.data.error && response.data.error.message) || defaultMsg
-            this.$message.error(errorMsg)
-          }
+          this.$message.success(this.isEdit ? '合约更新成功' : '合约上市成功')
+          this.dialogVisible = false
+          this.loadInstruments()
         } catch (error) {
           this.$message.error(this.isEdit ? '合约更新失败' : '合约上市失败')
           console.error(error)
@@ -368,14 +382,10 @@ export default {
           type: 'warning'
         })
 
-        const response = await suspendInstrument(row.instrument_id)
-        if (response.data && response.data.success) {
-          this.$message.success('已暂停交易')
-          this.loadInstruments()
-        } else {
-          const errorMsg = (response.data && response.data.error && response.data.error.message) || '暂停交易失败'
-          this.$message.error(errorMsg)
-        }
+        // request 拦截器已解包：失败会 reject 到 catch
+        await suspendInstrument(row.instrument_id)
+        this.$message.success('已暂停交易')
+        this.loadInstruments()
       } catch (error) {
         if (error !== 'cancel') {
           this.$message.error('暂停交易失败')
@@ -391,14 +401,10 @@ export default {
           type: 'success'
         })
 
-        const response = await resumeInstrument(row.instrument_id)
-        if (response.data && response.data.success) {
-          this.$message.success('已恢复交易')
-          this.loadInstruments()
-        } else {
-          const errorMsg = (response.data && response.data.error && response.data.error.message) || '恢复交易失败'
-          this.$message.error(errorMsg)
-        }
+        // request 拦截器已解包：失败会 reject 到 catch
+        await resumeInstrument(row.instrument_id)
+        this.$message.success('已恢复交易')
+        this.loadInstruments()
       } catch (error) {
         if (error !== 'cancel') {
           this.$message.error('恢复交易失败')
@@ -420,14 +426,10 @@ export default {
           }
         )
 
-        const response = await delistInstrument(row.instrument_id)
-        if (response.data && response.data.success) {
-          this.$message.success('合约已下市')
-          this.loadInstruments()
-        } else {
-          const errorMsg = (response.data && response.data.error && response.data.error.message) || '合约下市失败'
-          this.$message.error(errorMsg)
-        }
+        // request 拦截器已解包：失败会 reject 到 catch
+        await delistInstrument(row.instrument_id)
+        this.$message.success('合约已下市')
+        this.loadInstruments()
       } catch (error) {
         if (error !== 'cancel') {
           this.$message.error('合约下市失败')

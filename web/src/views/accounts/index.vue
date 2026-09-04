@@ -18,33 +18,37 @@
         </el-form-item>
       </el-form>
 
+      <!-- ✨ 表格高度改为跟随视口, 不再写死 500px @yutiansut @quantaxis
+           实测 1366x768: 表格上沿距内容区顶部 161px
+           var(--qa-content-h) 由 layout/index.vue 统一定义 = 100vh - 56(顶栏) - 40(padding),
+           有公告条时自动再减 40px; max(260px, ...) 是极短视口下的兜底 -->
       <el-table
         :data="accountList"
         border
         stripe
-        height="500"
+        :height="'max(260px, calc(var(--qa-content-h, calc(100vh - 96px)) - 161px))'"
         v-loading="loading"
         style="width: 100%"
       >
-        <el-table-column prop="account_id" label="账户ID" width="200" show-overflow-tooltip />
-        <el-table-column prop="account_name" label="账户名称" width="150" />
-        <el-table-column prop="account_type" label="账户类型" width="100" />
-        <el-table-column prop="balance" label="总权益" width="120" align="right">
+        <el-table-column prop="account_id" label="账户ID" min-width="200" show-overflow-tooltip />
+        <el-table-column prop="account_name" label="账户名称" min-width="150" />
+        <el-table-column prop="account_type" label="账户类型" min-width="100" />
+        <el-table-column prop="balance" label="总权益" min-width="120" align="right">
           <template slot-scope="scope">
             ¥{{ formatNumber(scope.row.balance) }}
           </template>
         </el-table-column>
-        <el-table-column prop="available" label="可用资金" width="120" align="right">
+        <el-table-column prop="available" label="可用资金" min-width="120" align="right">
           <template slot-scope="scope">
             ¥{{ formatNumber(scope.row.available) }}
           </template>
         </el-table-column>
-        <el-table-column prop="margin" label="保证金" width="120" align="right">
+        <el-table-column prop="margin" label="保证金" min-width="120" align="right">
           <template slot-scope="scope">
             ¥{{ formatNumber(scope.row.margin) }}
           </template>
         </el-table-column>
-        <el-table-column prop="risk_ratio" label="风险率" width="100" align="right">
+        <el-table-column prop="risk_ratio" label="风险率" min-width="100" align="right">
           <template slot-scope="scope">
             <el-tag :type="getRiskType(scope.row.risk_ratio)" size="mini">
               {{ (scope.row.risk_ratio * 100).toFixed(1) }}%

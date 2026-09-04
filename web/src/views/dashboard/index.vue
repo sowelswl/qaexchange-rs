@@ -237,6 +237,7 @@ export default {
       uptime: '0d 0h 0m',
       wsConnections: 0,
       charts: {},
+      resizeRaf: null,
       statusLoading: false
     }
   },
@@ -257,9 +258,21 @@ export default {
     })
     this.updateUptime()
     this.uptimeInterval = setInterval(this.updateUptime, 60000)
+    // ✨ 本页 3 个 ECharts 实例此前完全没有 resize 处理 @yutiansut @quantaxis
+    // 实测(headless Chrome 141): 1920 宽加载后把视口改到 1024, 三张 canvas
+    // 仍然是 786/786/1626px, 一动不动; 1440 下折叠侧边栏, .main-container
+    // 由 1220px 变 1376px, canvas 仍是 546/546/1146 —— 右侧凭空多出 156px 空白。
+    // .chart-row 在 768 断点下改成单列(见本文件 @media), 但 canvas 不 resize
+    // 的话那条媒体查询等于白写。
+    window.addEventListener('resize', this.onWindowResize)
   },
   beforeDestroy() {
     this.stopAutoRefresh()
+    window.removeEventListener('resize', this.onWindowResize)
+    if (this.resizeRaf) {
+      window.cancelAnimationFrame(this.resizeRaf)
+      this.resizeRaf = null
+    }
     if (this.uptimeInterval) {
       clearInterval(this.uptimeInterval)
     }
@@ -299,6 +312,19 @@ export default {
       this.initBalanceChart()
       this.initOrderChart()
       this.initOlapChart()
+    },
+
+    // ✨ 用 rAF 合并 resize 回调 @yutiansut @quantaxis
+    onWindowResize() {
+      if (this.resizeRaf) return
+      this.resizeRaf = window.requestAnimationFrame(() => {
+        this.resizeRaf = null
+        this.resizeCharts()
+      })
+    },
+
+    resizeCharts() {
+      Object.values(this.charts).forEach(chart => chart && chart.resize())
     },
 
     initBalanceChart() {
@@ -555,7 +581,9 @@ $danger-color: #f5222d;
 // 统计卡片
 .stat-cards {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  // 240px 在 1366 屏下排 4 列后每列仅剩 ~217px,装不下 17 位金额。
+  // 放宽到 260 让 auto-fit 在窄屏自动降到 3 列,每列 ~300px。
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
   gap: 20px;
   margin-bottom: 24px;
 }
@@ -629,11 +657,20 @@ $danger-color: #f5222d;
     margin-bottom: 12px;
 
     .stat-value {
-      font-size: 28px;
+      // 金额位数会长到 ¥45,417,766,890.32(17 字符),28px 等宽字体需要 ~303px,
+      // 而 1366 屏下卡片只有 ~217px → 数字被裁掉小数位,读成另一个数。
+      // 用 clamp 随视口缩放:1366 屏约 18px(装得下),1920 屏回到 26px(该有的层次)。
+      // 保留完整数字,不做亿/万缩写 —— 交易系统里精度不能省。
+      // @yutiansut @quantaxis
+      font-size: clamp(16px, 1.4vw, 28px);
       font-weight: 700;
       color: $dark-text-primary !important;
       line-height: 1.2;
       font-family: 'JetBrains Mono', monospace;
+      min-width: 0;                 // 允许在栅格/flex 里收缩
+      overflow: hidden;             // 万一还是装不下,给省略号而不是硬裁
+      text-overflow: ellipsis;
+      white-space: nowrap;
     }
 
     .stat-title {

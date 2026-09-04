@@ -394,7 +394,16 @@ impl OltpHybridStorage {
             .join(format!("{:010}.sst", sstable_id));
 
         // 创建 SSTable Writer
-        let mut writer = RkyvSSTableWriter::create(&sstable_path)?;
+        // ✨ 按真实条目数建 Bloom Filter @yutiansut @quantaxis
+        //
+        // `RkyvSSTableWriter::create` 内部写死 `create_with_capacity(path, 10000)`
+        // (oltp_rkyv.rs:105),而 `create_with_capacity` 除此之外**零调用**。
+        // 于是不论实际写多少条,布隆过滤器一律按 1 万条、1% 误判率来分配位数
+        // (95,851 bits)。条目数远超 1 万时误判率飙升,布隆过滤器失去意义 ——
+        // 每次点查都要真的去读 SSTable。
+        // 这里 entries 已在手,直接用它的长度。
+        let mut writer =
+            RkyvSSTableWriter::create_with_capacity(&sstable_path, entries.len().max(1))?;
 
         // 写入数据
         for (key, record) in entries {
@@ -795,7 +804,7 @@ mod tests {
     fn create_order_record(order_id: u64, timestamp: i64) -> WalRecord {
         WalRecord::OrderInsert {
             order_id,
-            user_id: [1u8; 32],
+            user_id: [1u8; 40],
             instrument_id: [1u8; 16],
             direction: 0,
             offset: 0,

@@ -20,7 +20,7 @@ const CONCURRENT_INSTRUMENTS: usize = 10;
 fn create_test_record(order_id: u64, timestamp: i64) -> WalRecord {
     WalRecord::OrderInsert {
         order_id,
-        user_id: [1u8; 32],
+        user_id: [1u8; 40],
         instrument_id: [2u8; 16],
         direction: 0,
         offset: 0,
@@ -41,6 +41,7 @@ fn bench_single_write_latency() {
             base_path: tmp_dir.path().to_str().unwrap().to_string(),
             memtable_size_bytes: 100 * 1024 * 1024, // 100MB，避免 flush
             estimated_entry_size: 256,
+            ..Default::default()
         },
     )
     .unwrap();
@@ -106,6 +107,7 @@ fn bench_batch_write_throughput() {
             base_path: tmp_dir.path().to_str().unwrap().to_string(),
             memtable_size_bytes: 100 * 1024 * 1024,
             estimated_entry_size: 256,
+            ..Default::default()
         },
     )
     .unwrap();
@@ -142,6 +144,7 @@ fn bench_range_query() {
             base_path: tmp_dir.path().to_str().unwrap().to_string(),
             memtable_size_bytes: 10 * 1024 * 1024, // 10MB，会触发多次 flush
             estimated_entry_size: 256,
+            ..Default::default()
         },
     )
     .unwrap();
@@ -199,6 +202,7 @@ fn bench_flush_performance() {
             base_path: tmp_dir.path().to_str().unwrap().to_string(),
             memtable_size_bytes: 1 * 1024 * 1024, // 1MB，容易触发 flush
             estimated_entry_size: 256,
+            ..Default::default()
         },
     )
     .unwrap();
@@ -262,6 +266,7 @@ fn bench_concurrent_instruments() {
                     base_path,
                     memtable_size_bytes: 10 * 1024 * 1024,
                     estimated_entry_size: 256,
+                    ..Default::default()
                 },
             )
             .unwrap();
@@ -319,6 +324,7 @@ fn bench_recovery_performance() {
                 base_path: base_path.clone(),
                 memtable_size_bytes: 100 * 1024 * 1024,
                 estimated_entry_size: 256,
+                ..Default::default()
             };
 
             let storage = OltpHybridStorage::create("IF2501", config).unwrap();
@@ -337,6 +343,7 @@ fn bench_recovery_performance() {
                 base_path: base_path.clone(),
                 memtable_size_bytes: 100 * 1024 * 1024,
                 estimated_entry_size: 256,
+                ..Default::default()
             };
 
             let storage = OltpHybridStorage::create("IF2501", config).unwrap();

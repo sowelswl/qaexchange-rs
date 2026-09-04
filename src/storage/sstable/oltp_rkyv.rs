@@ -431,7 +431,7 @@ mod tests {
         let key = MemTableKey::new(timestamp, seq);
         let value = MemTableValue::new(WalRecord::OrderInsert {
             order_id: seq,
-            user_id: [1u8; 32],
+            user_id: [1u8; 40],
             instrument_id: [1u8; 16],
             direction: 0,
             offset: 0,

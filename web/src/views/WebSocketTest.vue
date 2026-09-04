@@ -334,8 +334,8 @@
             </template>
 
             <el-table :data="positionList" stripe size="small" max-height="250">
-              <el-table-column prop="instrument_id" label="合约" width="120" />
-              <el-table-column label="多头" width="180">
+              <el-table-column prop="instrument_id" label="合约" min-width="120" show-overflow-tooltip/>
+              <el-table-column label="多头" min-width="180">
                 <template #default="{ row }">
                   <div v-if="row.volume_long > 0">
                     {{ row.volume_long }} @ {{ formatNumber(row.open_price_long) }}
@@ -343,7 +343,7 @@
                   <div v-else>-</div>
                 </template>
               </el-table-column>
-              <el-table-column label="空头" width="180">
+              <el-table-column label="空头" min-width="180">
                 <template #default="{ row }">
                   <div v-if="row.volume_short > 0">
                     {{ row.volume_short }} @ {{ formatNumber(row.open_price_short) }}
@@ -351,7 +351,7 @@
                   <div v-else>-</div>
                 </template>
               </el-table-column>
-              <el-table-column label="浮动盈亏" width="120">
+              <el-table-column label="浮动盈亏" min-width="120">
                 <template #default="{ row }">
                   <span :class="row.float_profit >= 0 ? 'profit' : 'loss'">
                     {{ formatProfit(row.float_profit) }}
@@ -398,9 +398,9 @@
             </template>
 
             <el-table :data="activeOrdersList" stripe size="small" max-height="250">
-              <el-table-column prop="order_id" label="订单号" width="150" show-overflow-tooltip />
-              <el-table-column prop="instrument_id" label="合约" width="120" />
-              <el-table-column label="方向" width="100">
+              <el-table-column prop="order_id" label="订单号" min-width="150" show-overflow-tooltip />
+              <el-table-column prop="instrument_id" label="合约" min-width="120" show-overflow-tooltip/>
+              <el-table-column label="方向" min-width="100">
                 <template #default="{ row }">
                   <el-tag :type="row.direction === 'BUY' ? 'danger' : 'success'" size="mini">
                     {{ row.direction === 'BUY' ? '买' : '卖' }}
@@ -410,17 +410,17 @@
                   </el-tag>
                 </template>
               </el-table-column>
-              <el-table-column label="价格" width="100">
+              <el-table-column label="价格" min-width="100">
                 <template #default="{ row }">
                   {{ row.price_type === 'MARKET' ? '市价' : formatNumber(row.limit_price) }}
                 </template>
               </el-table-column>
-              <el-table-column label="数量" width="100">
+              <el-table-column label="数量" min-width="100">
                 <template #default="{ row }">
                   {{ row.volume_left }} / {{ row.volume_orign }}
                 </template>
               </el-table-column>
-              <el-table-column label="状态" width="100">
+              <el-table-column label="状态" min-width="100">
                 <template #default="{ row }">
                   <el-tag :type="getOrderStatusType(row.status)" size="mini">
                     {{ getOrderStatusText(row.status) }}

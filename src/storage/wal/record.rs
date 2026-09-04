@@ -48,7 +48,7 @@ pub enum WalRecord {
     /// 账户开户
     AccountOpen {
         account_id: [u8; 64],   // 账户ID (Phase 10: 新增)
-        user_id: [u8; 32],      // 用户ID (所有者)
+        user_id: [u8; 40],      // 用户ID (所有者)
         account_name: [u8; 64], // 账户名称 (Phase 10: 修正语义)
         init_cash: f64,         // 初始资金
         account_type: u8,       // 0=个人, 1=机构
@@ -58,7 +58,7 @@ pub enum WalRecord {
     /// 订单写入
     OrderInsert {
         order_id: u64,           // 品种内递增 ID (8 bytes)
-        user_id: [u8; 32],       // 用户ID
+        user_id: [u8; 40],       // 用户ID
         instrument_id: [u8; 16], // 合约ID（已隐含在 Per-Instrument WAL 中，但保留用于跨品种查询）
         direction: u8,           // 0=BUY, 1=SELL
         offset: u8,              // 0=OPEN, 1=CLOSE
@@ -79,7 +79,7 @@ pub enum WalRecord {
 
     /// 账户更新
     AccountUpdate {
-        user_id: [u8; 32],
+        user_id: [u8; 40],
         balance: f64,
         available: f64,
         frozen: f64,
@@ -159,7 +159,7 @@ pub enum WalRecord {
         volume: f64,                 // 委托数量
         time: i64,                   // 纳秒时间戳
         internal_order_id: [u8; 32], // 内部订单ID (用于映射)
-        user_id: [u8; 32],           // 用户ID (所有者)
+        user_id: [u8; 40],           // 用户ID (所有者)
     },
 
     /// 交易所内部逐笔成交记录 (Phase 5)
@@ -182,7 +182,7 @@ pub enum WalRecord {
         response_type: u8, // 0=OrderAccepted, 1=OrderRejected, 2=Trade, 3=CancelAccepted, 4=CancelRejected
         exchange_order_id: i64, // 交易所订单号
         instrument: [u8; 16], // 合约代码
-        user_id: [u8; 32], // 用户ID
+        user_id: [u8; 40], // 用户ID
         timestamp: i64,    // 纳秒时间戳
         // 可选字段 (根据response_type使用)
         trade_id: i64,     // 仅Trade类型使用
@@ -264,7 +264,7 @@ pub enum WalRecord {
     /// - 4: PARTIALLY_FILLED (部分成交中)
     OrderStatusUpdate {
         order_id: [u8; 64],      // 订单ID (qars内部ID)
-        user_id: [u8; 32],       // 用户/账户ID
+        user_id: [u8; 40],       // 用户/账户ID
         instrument_id: [u8; 16], // 合约ID
         status: u8,              // 订单状态: 0=ALIVE, 1=FINISHED, 2=CANCELLED, 3=REJECTED, 4=PARTIALLY_FILLED
         volume_orign: f64,       // 原始委托量
@@ -284,7 +284,7 @@ pub enum WalRecord {
     /// 用于定期保存持仓状态，支持快速恢复
     /// 每个合约独立记录，恢复时重建 hold HashMap
     PositionSnapshot {
-        user_id: [u8; 32],       // 用户/账户ID
+        user_id: [u8; 40],       // 用户/账户ID
         instrument_id: [u8; 16], // 合约ID
         exchange_id: [u8; 16],   // 交易所ID
         // 多头持仓
@@ -322,7 +322,7 @@ pub enum WalRecord {
     /// 详细的持仓和订单通过 PositionSnapshot 和 OrderStatusUpdate 恢复
     AccountSnapshot {
         account_id: [u8; 64],    // 账户ID
-        user_id: [u8; 32],       // 用户ID（所有者）
+        user_id: [u8; 40],       // 用户ID（所有者）
         // 资金状态
         balance: f64,            // 账户权益
         available: f64,          // 可用资金
@@ -362,10 +362,18 @@ impl WalRecord {
     }
 
     /// 辅助函数：字符串转固定长度数组 [u8; 32]
+    ///
+    /// ⚠️ 超长会**静默截断**。历史事故:36 字符的 UUID / `ACC_`+32hex 账户ID
+    /// 塞进 [u8;32] 丢掉末尾 4 字符,WAL 账户恢复 46/46 全败且无任何报错。
+    /// **凡是装 user_id / account_id 的一律用 `to_fixed_array_40`。**
+    /// @yutiansut @quantaxis
     pub fn to_fixed_array_32(s: &str) -> [u8; 32] {
         let mut arr = [0u8; 32];
         let bytes = s.as_bytes();
         let len = bytes.len().min(32);
+        if bytes.len() > 32 {
+            log::warn!("to_fixed_array_32 截断: {} 字节 -> 32 ({:?})", bytes.len(), &s[..s.len().min(48)]);
+        }
         arr[..len].copy_from_slice(&bytes[..len]);
         arr
     }
@@ -375,6 +383,9 @@ impl WalRecord {
         let mut arr = [0u8; 40];
         let bytes = s.as_bytes();
         let len = bytes.len().min(40);
+        if bytes.len() > 40 {
+            log::warn!("to_fixed_array_40 截断: {} 字节 -> 40 ({:?})", bytes.len(), &s[..s.len().min(56)]);
+        }
         arr[..len].copy_from_slice(&bytes[..len]);
         arr
     }
@@ -476,7 +487,7 @@ mod tests {
     fn test_wal_record_serialization() {
         let record = WalRecord::OrderInsert {
             order_id: 1,
-            user_id: [2u8; 32],
+            user_id: [2u8; 40],
             instrument_id: [3u8; 16],
             direction: 0,
             offset: 0,
@@ -530,7 +541,7 @@ mod tests {
     #[test]
     fn test_round_trip() {
         let record = WalRecord::AccountUpdate {
-            user_id: [1u8; 32],
+            user_id: [1u8; 40],
             balance: 1000000.0,
             available: 900000.0,
             frozen: 100000.0,

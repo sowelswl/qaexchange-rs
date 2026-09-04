@@ -199,48 +199,48 @@
         size="small"
       >
         <el-table-column prop="instrument" label="合约" width="120" fixed />
-        <el-table-column prop="timestamp" label="时间" width="160" />
-        <el-table-column prop="ma5" label="MA5" width="100">
+        <el-table-column prop="timestamp" label="时间" min-width="160" />
+        <el-table-column prop="ma5" label="MA5" min-width="100">
           <template slot-scope="{ row }">
             <span :class="getValueClass(row.ma5, row.ma10)">{{ formatValue(row.ma5) }}</span>
           </template>
         </el-table-column>
-        <el-table-column prop="ma10" label="MA10" width="100">
+        <el-table-column prop="ma10" label="MA10" min-width="100">
           <template slot-scope="{ row }">
             <span>{{ formatValue(row.ma10) }}</span>
           </template>
         </el-table-column>
-        <el-table-column prop="ma20" label="MA20" width="100">
+        <el-table-column prop="ma20" label="MA20" min-width="100">
           <template slot-scope="{ row }">
             <span>{{ formatValue(row.ma20) }}</span>
           </template>
         </el-table-column>
-        <el-table-column prop="ema12" label="EMA12" width="100">
+        <el-table-column prop="ema12" label="EMA12" min-width="100">
           <template slot-scope="{ row }">
             <span>{{ formatValue(row.ema12) }}</span>
           </template>
         </el-table-column>
-        <el-table-column prop="ema26" label="EMA26" width="100">
+        <el-table-column prop="ema26" label="EMA26" min-width="100">
           <template slot-scope="{ row }">
             <span>{{ formatValue(row.ema26) }}</span>
           </template>
         </el-table-column>
-        <el-table-column prop="rsi14" label="RSI14" width="100">
+        <el-table-column prop="rsi14" label="RSI14" min-width="100">
           <template slot-scope="{ row }">
             <span :class="getRsiValueClass(row.rsi14)">{{ formatValue(row.rsi14, 2) }}</span>
           </template>
         </el-table-column>
-        <el-table-column prop="macd_dif" label="DIF" width="100">
+        <el-table-column prop="macd_dif" label="DIF" min-width="100">
           <template slot-scope="{ row }">
             <span :class="getDifClass(row)">{{ formatValue(row.macd_dif) }}</span>
           </template>
         </el-table-column>
-        <el-table-column prop="macd_dea" label="DEA" width="100">
+        <el-table-column prop="macd_dea" label="DEA" min-width="100">
           <template slot-scope="{ row }">
             <span>{{ formatValue(row.macd_dea) }}</span>
           </template>
         </el-table-column>
-        <el-table-column prop="macd_hist" label="MACD" width="100">
+        <el-table-column prop="macd_hist" label="MACD" min-width="100">
           <template slot-scope="{ row }">
             <span :class="row.macd_hist >= 0 ? 'positive' : 'negative'">
               {{ formatValue(row.macd_hist) }}

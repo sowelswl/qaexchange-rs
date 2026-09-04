@@ -798,7 +798,7 @@ mod tests {
         }
 
         // 触发 on_trade（正常情况下由 TradeGateway 调用）
-        market_service.on_trade("E2E001", 100.0, 10);
+        market_service.on_trade("E2E001", 100.0, 10, "buy");
 
         // 接收广播
         let event = receiver.try_recv();
@@ -863,7 +863,7 @@ mod tests {
             }
 
             // 触发数据处理
-            market_service.on_trade("T2K001", 100.0 + i as f64, 10);
+            market_service.on_trade("T2K001", 100.0 + i as f64, 10, "buy");
         }
 
         // 验证K线数据存在
@@ -936,7 +936,7 @@ mod tests {
                     let _ = ob.process_order(buy_order);
                 }
 
-                market_service.on_trade(id, 100.0 + i as f64, 1);
+                market_service.on_trade(id, 100.0 + i as f64, 1, "buy");
             }
         }
 
@@ -1011,7 +1011,7 @@ mod tests {
 
             // 触发数据生产（每10笔触发一次以模拟批量处理）
             if i % 10 == 0 {
-                market_service.on_trade("HT001", 100.0, 10);
+                market_service.on_trade("HT001", 100.0, 10, "buy");
             }
         }
 
@@ -1120,7 +1120,7 @@ mod tests {
                 let _ = ob.process_order(buy_order);
             }
 
-            market_service.on_trade("CONS001", price, volume);
+            market_service.on_trade("CONS001", price, volume, "buy");
         }
 
         // 验证K线数据

@@ -372,7 +372,18 @@ impl SnapshotManager {
     /// # 参数
     ///
     /// * `user_id` - 用户ID
-    pub async fn remove_user(&self, user_id: &str) {
+    /// 移除用户快照
+    ///
+    /// ⚠️ 本函数**不是** async —— 函数体只有一句 DashMap::remove,没有任何 await。
+    /// 它原本被标成 `pub async fn`,逼得唯一的生产调用方
+    /// (`diff_handler.rs` 的 `Actor::stopped()`)只能 `tokio::spawn` 一个
+    /// 什么都不等的 future 来调它。而 `stopped()` 是同步生命周期钩子,
+    /// 在 System 关停 / 跨线程 drop 时**所在线程没有 tokio reactor**,
+    /// `tokio::spawn` 直接 panic:
+    ///     there is no reactor running, must be called from the context of a Tokio 1.x runtime
+    /// 一个 arbiter 线程炸掉,整个 HTTP 服务停止监听(进程还在,端口没了)。
+    /// 2026-09-03 22:33:36 线上就是这么挂的。@yutiansut @quantaxis
+    pub fn remove_user(&self, user_id: &str) {
         self.user_snapshots.remove(user_id);
     }
 
@@ -597,7 +608,7 @@ mod tests {
             .await;
 
         // 移除用户
-        manager.remove_user("user123").await;
+        manager.remove_user("user123");
 
         // 获取快照应该返回 None
         let snapshot = manager.get_snapshot("user123").await;

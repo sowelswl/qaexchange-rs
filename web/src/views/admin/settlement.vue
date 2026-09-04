@@ -58,10 +58,10 @@
               stripe
               height="200"
             >
-              <el-table-column prop="instrument_id" label="合约代码" width="150"></el-table-column>
-              <el-table-column prop="settlement_price" label="结算价" width="120" align="right"></el-table-column>
-              <el-table-column prop="last_price" label="最新价" width="120" align="right"></el-table-column>
-              <el-table-column prop="change_rate" label="涨跌幅" width="120" align="right">
+              <el-table-column prop="instrument_id" label="合约代码" min-width="150" show-overflow-tooltip></el-table-column>
+              <el-table-column prop="settlement_price" label="结算价" min-width="120" align="right"></el-table-column>
+              <el-table-column prop="last_price" label="最新价" min-width="120" align="right"></el-table-column>
+              <el-table-column prop="change_rate" label="涨跌幅" min-width="120" align="right">
                 <template slot-scope="scope">
                   <span :style="{ color: scope.row.change_rate >= 0 ? '#F56C6C' : '#67C23A' }">
                     {{ scope.row.change_rate >= 0 ? '+' : '' }}{{ (scope.row.change_rate * 100).toFixed(2) }}%
@@ -92,40 +92,44 @@
           ></el-date-picker>
         </div>
 
+        <!-- ✨ 表格高度改为跟随视口, 不再写死 500px @yutiansut @quantaxis
+             推算(该 tab 未实测): 参照 risk.vue 同构布局取 300px
+             var(--qa-content-h) 由 layout/index.vue 统一定义 = 100vh - 56(顶栏) - 40(padding),
+             有公告条时自动再减 40px; max(260px, ...) 是极短视口下的兜底 -->
         <el-table
           ref="historyTable"
           :data="historyList"
           border
           stripe
           v-loading="historyLoading"
-          height="500"
+          :height="'max(260px, calc(var(--qa-content-h, calc(100vh - 96px)) - 300px))'"
         >
-          <el-table-column prop="settlement_date" label="结算日期" width="120"></el-table-column>
-          <el-table-column prop="instrument_count" label="合约数" width="100" align="center"></el-table-column>
-          <el-table-column prop="account_count" label="账户数" width="100" align="center"></el-table-column>
-          <el-table-column prop="total_profit" label="总盈亏" width="150" align="right">
+          <el-table-column prop="settlement_date" label="结算日期" min-width="120"></el-table-column>
+          <el-table-column prop="instrument_count" label="合约数" min-width="100" align="center"></el-table-column>
+          <el-table-column prop="account_count" label="账户数" min-width="100" align="center"></el-table-column>
+          <el-table-column prop="total_profit" label="总盈亏" min-width="150" align="right">
             <template slot-scope="scope">
               <span :style="{ color: scope.row.total_profit >= 0 ? '#F56C6C' : '#67C23A' }">
                 {{ scope.row.total_profit >= 0 ? '+' : '' }}{{ scope.row.total_profit.toLocaleString('zh-CN', { minimumFractionDigits: 2 }) }}
               </span>
             </template>
           </el-table-column>
-          <el-table-column prop="total_commission" label="总手续费" width="150" align="right">
+          <el-table-column prop="total_commission" label="总手续费" min-width="150" align="right">
             <template slot-scope="scope">
               {{ scope.row.total_commission.toLocaleString('zh-CN', { minimumFractionDigits: 2 }) }}
             </template>
           </el-table-column>
-          <el-table-column prop="profit_accounts" label="盈利账户数" width="120" align="center"></el-table-column>
-          <el-table-column prop="loss_accounts" label="亏损账户数" width="120" align="center"></el-table-column>
-          <el-table-column prop="liquidation_count" label="强平账户数" width="120" align="center"></el-table-column>
-          <el-table-column prop="status" label="状态" width="100">
+          <el-table-column prop="profit_accounts" label="盈利账户数" min-width="120" align="center"></el-table-column>
+          <el-table-column prop="loss_accounts" label="亏损账户数" min-width="120" align="center"></el-table-column>
+          <el-table-column prop="liquidation_count" label="强平账户数" min-width="120" align="center"></el-table-column>
+          <el-table-column prop="status" label="状态" min-width="100">
             <template slot-scope="scope">
               <el-tag :type="getStatusTagType(scope.row.status)" size="small">
                 {{ getStatusName(scope.row.status) }}
               </el-tag>
             </template>
           </el-table-column>
-          <el-table-column prop="execution_time" label="执行时间" width="180"></el-table-column>
+          <el-table-column prop="execution_time" label="执行时间" min-width="180"></el-table-column>
           <el-table-column label="操作" width="100">
             <template slot-scope="scope">
               <el-button size="mini" type="text" @click="viewDetail(scope.row)">详情</el-button>
@@ -137,7 +141,7 @@
       <!-- 结算统计 -->
       <el-tab-pane label="结算统计" name="statistics">
         <el-row :gutter="20" class="stats-row">
-          <el-col :span="6">
+          <el-col :xs="24" :sm="12" :lg="6">
             <div class="stat-card">
               <div class="stat-icon">
                 <i class="el-icon-document-checked"></i>
@@ -149,7 +153,7 @@
             </div>
           </el-col>
 
-          <el-col :span="6">
+          <el-col :xs="24" :sm="12" :lg="6">
             <div class="stat-card">
               <div class="stat-icon" style="color: #F56C6C">
                 <i class="el-icon-user"></i>
@@ -161,7 +165,7 @@
             </div>
           </el-col>
 
-          <el-col :span="6">
+          <el-col :xs="24" :sm="12" :lg="6">
             <div class="stat-card">
               <div class="stat-icon" style="color: #67C23A">
                 <i class="el-icon-user"></i>
@@ -173,7 +177,7 @@
             </div>
           </el-col>
 
-          <el-col :span="6">
+          <el-col :xs="24" :sm="12" :lg="6">
             <div class="stat-card">
               <div class="stat-icon" style="color: #409EFF">
                 <i class="el-icon-coin"></i>
@@ -255,17 +259,17 @@
               border
               size="mini"
             >
-              <el-table-column prop="user_id" label="账户" width="160" />
-              <el-table-column prop="balance" label="结算后权益" width="140" align="right">
+              <el-table-column prop="user_id" label="账户" min-width="160" show-overflow-tooltip/>
+              <el-table-column prop="balance" label="结算后权益" min-width="140" align="right">
                 <template slot-scope="{ row }">{{ formatCurrency(row.balance) }}</template>
               </el-table-column>
-              <el-table-column prop="close_profit" label="平仓盈亏" width="120" align="right">
+              <el-table-column prop="close_profit" label="平仓盈亏" min-width="120" align="right">
                 <template slot-scope="{ row }">{{ formatCurrency(row.close_profit) }}</template>
               </el-table-column>
-              <el-table-column prop="position_profit" label="持仓盈亏" width="120" align="right">
+              <el-table-column prop="position_profit" label="持仓盈亏" min-width="120" align="right">
                 <template slot-scope="{ row }">{{ formatCurrency(row.position_profit) }}</template>
               </el-table-column>
-              <el-table-column prop="commission" label="手续费" width="100" align="right">
+              <el-table-column prop="commission" label="手续费" min-width="100" align="right">
                 <template slot-scope="{ row }">{{ formatCurrency(row.commission) }}</template>
               </el-table-column>
             </el-table>
@@ -277,10 +281,10 @@
               border
               size="mini"
             >
-              <el-table-column prop="instrument_id" label="合约" width="140" />
-              <el-table-column prop="settlement_price" label="结算价" width="120" align="right" />
-              <el-table-column prop="last_price" label="最新价" width="120" align="right" />
-              <el-table-column prop="change_rate" label="涨跌幅" width="120" align="right">
+              <el-table-column prop="instrument_id" label="合约" min-width="140" show-overflow-tooltip/>
+              <el-table-column prop="settlement_price" label="结算价" min-width="120" align="right" />
+              <el-table-column prop="last_price" label="最新价" min-width="120" align="right" />
+              <el-table-column prop="change_rate" label="涨跌幅" min-width="120" align="right">
                 <template slot-scope="{ row }">
                   {{ ((row.change_rate || 0) * 100).toFixed(2) }}%
                 </template>
@@ -499,23 +503,15 @@ export default {
           }))
         }
 
-        const priceResponse = await batchSetSettlementPrices(pricesData)
-        if (!priceResponse.data || !priceResponse.data.success) {
-          const errorMsg = (priceResponse.data && priceResponse.data.error && priceResponse.data.error.message) || '设置结算价失败'
-          throw new Error(errorMsg)
-        }
+        // request 拦截器已解包 { success, data, error }：任一步失败都会 reject 到 catch
+        await batchSetSettlementPrices(pricesData)
 
         // 步骤2：执行日终结算
-        const settlementResponse = await executeSettlement()
-        if (settlementResponse.data && settlementResponse.data.success) {
-          this.$message.success('结算执行成功')
-          this.settlementPrices = []
-          this.loadHistory()
-          this.loadStatistics()
-        } else {
-          const errorMsg = (settlementResponse.data && settlementResponse.data.error && settlementResponse.data.error.message) || '结算执行失败'
-          throw new Error(errorMsg)
-        }
+        await executeSettlement()
+        this.$message.success('结算执行成功')
+        this.settlementPrices = []
+        this.loadHistory()
+        this.loadStatistics()
       } catch (error) {
         if (error !== 'cancel') {
           this.$message.error(error.message || '结算执行失败')

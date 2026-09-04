@@ -1,5 +1,13 @@
 <template>
-  <div class="layout">
+  <div
+    class="layout"
+    :class="{
+      'has-announcement': showAnnouncementBar && currentAnnouncement,
+      'is-mobile': isMobile,
+      'sidebar-collapsed': isCollapsed,
+      'drawer-open': mobileDrawerOpen
+    }"
+  >
     <!-- 侧边栏 -->
     <div class="sidebar" :class="{ collapsed: isCollapsed }">
       <div class="sidebar-header">
@@ -35,7 +43,12 @@
           <span slot="title">交易面板</span>
         </el-menu-item>
         <el-menu-item index="/chart">
-          <i class="el-icon-trend-charts"></i>
+          <!-- ⚠️ 原来是 el-icon-trend-charts —— Element UI 2.15 **没有这个图标**
+               (element-ui/lib/theme-chalk/index.css 里 0 命中),
+               于是 <i> 渲染成空元素,侧边栏该项没有图标。
+               合法的近义图标:el-icon-data-line / data-analysis / data-board。
+               K线用 data-line(折线)最贴切。@yutiansut @quantaxis -->
+          <i class="el-icon-data-line"></i>
           <span slot="title">K线图表</span>
         </el-menu-item>
         <el-menu-item index="/orders">
@@ -158,6 +171,13 @@
       </div>
     </div>
 
+    <!-- ✨ 移动端抽屉遮罩: 点击关闭侧边栏 @yutiansut @quantaxis -->
+    <div
+      v-if="isMobile && mobileDrawerOpen"
+      class="sidebar-overlay"
+      @click="closeMobileDrawer"
+    ></div>
+
     <!-- 右侧区域 -->
     <div class="main-container">
       <!-- ✨ 公告通知栏 @yutiansut @quantaxis -->
@@ -188,6 +208,10 @@
       <!-- 顶部栏 -->
       <div class="top-header">
         <div class="header-left">
+          <!-- ✨ 移动端菜单按钮: 抽屉收起后, 侧边栏里的折叠按钮不可达 @yutiansut @quantaxis -->
+          <div v-if="isMobile" class="mobile-menu-btn" @click="toggleCollapse">
+            <i :class="mobileDrawerOpen ? 'el-icon-close' : 'el-icon-s-fold'"></i>
+          </div>
           <div class="page-title">{{ pageTitle }}</div>
         </div>
         <div class="header-right">
@@ -249,6 +273,11 @@ export default {
     return {
       isCollapsed: false,
       isMobile: false,
+      // ✨ 记住用户在宽屏下的折叠意愿, 从窄屏放大回来时按它恢复 @yutiansut @quantaxis
+      userCollapsed: false,
+      // ✨ 窄屏抽屉是否展开(抽屉浮在内容之上, 不再挤压内容)
+      mobileDrawerOpen: false,
+      resizeRaf: null,
       // ✨ 公告系统 @yutiansut @quantaxis
       announcements: [],
       showAnnouncementBar: false,
@@ -324,12 +353,18 @@ export default {
   },
   mounted() {
     this.checkMobile()
-    window.addEventListener('resize', this.checkMobile)
+    // ✨ 用 rAF 合并 resize 回调: 原来 checkMobile 直接绑在 resize 上,
+    //    拖动窗口时每帧都会触发一次 Vue 重渲染 @yutiansut @quantaxis
+    window.addEventListener('resize', this.onWindowResize)
     // ✨ 加载公告 @yutiansut @quantaxis
     this.loadAnnouncements()
   },
   beforeDestroy() {
-    window.removeEventListener('resize', this.checkMobile)
+    window.removeEventListener('resize', this.onWindowResize)
+    if (this.resizeRaf) {
+      window.cancelAnimationFrame(this.resizeRaf)
+      this.resizeRaf = null
+    }
     // ✨ 清理公告轮播定时器 @yutiansut @quantaxis
     if (this.announcementTimer) {
       clearInterval(this.announcementTimer)
@@ -338,6 +373,10 @@ export default {
   methods: {
     handleMenuSelect(index) {
       this.$router.push(index)
+      // ✨ 窄屏下选完菜单立刻收起抽屉, 否则遮罩挡住刚跳转的页面 @yutiansut @quantaxis
+      if (this.isMobile) {
+        this.closeMobileDrawer()
+      }
     },
     handleUserCommand(command) {
       if (command === 'logout') {
@@ -353,13 +392,56 @@ export default {
       }
     },
     toggleCollapse() {
-      this.isCollapsed = !this.isCollapsed
+      if (this.isMobile) {
+        // 窄屏: 开/关抽屉。抽屉展开时显示完整菜单文字
+        this.mobileDrawerOpen = !this.mobileDrawerOpen
+        this.isCollapsed = !this.mobileDrawerOpen
+      } else {
+        this.isCollapsed = !this.isCollapsed
+        // ✨ 记录宽屏下的折叠意愿, 供 checkMobile 恢复用
+        this.userCollapsed = this.isCollapsed
+      }
+      this.notifyLayoutChange()
+    },
+    closeMobileDrawer() {
+      this.mobileDrawerOpen = false
+      this.isCollapsed = true
     },
     checkMobile() {
+      const wasMobile = this.isMobile
       this.isMobile = window.innerWidth < 768
       if (this.isMobile) {
         this.isCollapsed = true
+        if (!wasMobile) {
+          this.mobileDrawerOpen = false
+        }
+      } else if (wasMobile) {
+        // ✨ 原来这里没有 else 分支: 窗口一旦被缩窄过, isCollapsed 就永久为 true,
+        //    再放大也不会恢复展开。实测(headless Chrome): 700px 宽时 sidebar 64px,
+        //    放大到 1600px 后仍然是 64px。 @yutiansut @quantaxis
+        this.isCollapsed = this.userCollapsed
+        this.mobileDrawerOpen = false
       }
+      if (wasMobile !== this.isMobile) {
+        this.notifyLayoutChange()
+      }
+    },
+    onWindowResize() {
+      if (this.resizeRaf) return
+      this.resizeRaf = window.requestAnimationFrame(() => {
+        this.resizeRaf = null
+        this.checkMobile()
+      })
+    },
+    // ✨ 侧边栏宽度变化不是 window resize, 但对图表而言完全等价。
+    //    实测: 1440x900 折叠侧边栏后 .main-container 由 1220px 变为 1376px,
+    //    而三个 ECharts canvas 仍然是 546/546/1146 —— 右侧凭空多出 156px 空白。
+    //    等 CSS transition(0.25s) 走完后广播一次 resize, 让所有监听 resize 的
+    //    图表(见 KLineChart.vue / dashboard / chart 页)重新计算尺寸。 @yutiansut @quantaxis
+    notifyLayoutChange() {
+      window.setTimeout(() => {
+        window.dispatchEvent(new Event('resize'))
+      }, 300)
     },
     // ✨ 加载公告列表 @yutiansut @quantaxis
     async loadAnnouncements() {
@@ -368,8 +450,8 @@ export default {
         // 过滤有效期内的公告
         const now = Date.now()
         this.announcements = (res.announcements || []).filter(a => {
-          const from = a.effective_from ? a.effective_from * 1000 : 0
-          const until = a.effective_until ? a.effective_until * 1000 : Number.MAX_SAFE_INTEGER
+          const from = a.publish_time ? a.publish_time : 0
+          const until = a.expire_time ? a.expire_time : Number.MAX_SAFE_INTEGER
           return now >= from && now <= until
         })
         // 按优先级排序：Urgent > High > Normal > Low
@@ -416,6 +498,7 @@ export default {
 $sidebar-width: 220px;
 $sidebar-collapsed-width: 64px;
 $header-height: 56px;
+$announcement-height: 40px;   // ✨ 与 .announcement-bar 的 height 保持一致
 $primary-color: #1890ff;
 $dark-bg-primary: #0d1117;
 $dark-bg-secondary: #161b22;
@@ -427,8 +510,69 @@ $dark-text-secondary: #8b949e;
 // ✨ 深色主题配色 @yutiansut @quantaxis
 .layout {
   display: flex;
-  min-height: 100vh;
+  height: 100vh;          // ✨ 定高，为内部 flex 子项提供确定的主尺寸
+  overflow: hidden;       // ✨ 外层不滚动，滚动交给 .content-wrapper
   background: $dark-bg-primary;  // 深色主题背景
+  // ✨ 全站唯一的布局预算口径 @yutiansut @quantaxis
+  // 之前全仓库没有一处把这几个数加对: 散落着 -56px / -60px /
+  // -100px / -150px / -220px / -250px 六种互相矛盾的写法, 没有一处等于真实值。
+  // 真实几何: top-header 56px + content-wrapper 上下 padding 各 20px = 96px;
+  //          公告条出现时再 +40px = 136px。
+  // 各页面请一律用 var(--qa-content-h) / var(--qa-content-w),
+  // 不要再手写 calc(100vh - N)。
+  --qa-header-h: #{$header-height};
+  --qa-content-pad: 20px;
+  --qa-announcement-h: 0px;
+  --qa-sidebar-w: #{$sidebar-width};
+  --qa-content-h: calc(
+    100vh - var(--qa-header-h) - var(--qa-announcement-h) - var(--qa-content-pad) * 2
+  );
+  --qa-content-w: calc(100vw - var(--qa-sidebar-w) - var(--qa-content-pad) * 2);
+
+  // ✨ 公告条出现时预算再减 40px, 得到真实的 100vh - 136px @yutiansut @quantaxis
+  &.has-announcement {
+    --qa-announcement-h: #{$announcement-height};
+  }
+
+  // 侧边栏折叠时可用宽度变宽。注意 .collapsed 在后代元素上, CSS 无法向上冒泡,
+  // 所以由 Vue 在 .layout 上同步一个 .sidebar-collapsed 类。 @yutiansut @quantaxis
+  &.sidebar-collapsed {
+    --qa-sidebar-w: #{$sidebar-collapsed-width};
+  }
+}
+
+// ✨ 移动端抽屉遮罩 @yutiansut @quantaxis
+.sidebar-overlay {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  background: rgba(0, 0, 0, 0.55);
+  z-index: 999;   // 低于 .sidebar 的 1000, 高于内容
+}
+
+// ✨ 移动端顶栏菜单按钮 @yutiansut @quantaxis
+.mobile-menu-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  margin-right: 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  color: $dark-text-secondary;
+  transition: all 0.2s ease;
+
+  i {
+    font-size: 20px;
+  }
+
+  &:hover {
+    background: $dark-bg-tertiary;
+    color: $dark-text-primary;
+  }
 }
 
 // 侧边栏
@@ -582,10 +726,24 @@ $dark-text-secondary: #8b949e;
 // 主内容区
 .main-container {
   flex: 1;
+  // ✨✨ 小屏「内容显示不全」的头号根因 @yutiansut @quantaxis
+  // flex item 的 min-width 默认是 auto (= min-content), 而本容器里装着
+  // el-table-column 固定宽度合计 1110~3960px 的宽表, 于是 min-content
+  // 被撑到 1280px+, flex:1 再也收缩不下去。
+  // 实测 (headless Chrome 141, 1024x768, #/orders):
+  //   .main-container 宽 1364px, 右边缘 1584px, 超出视口 560px;
+  //   .top-header 同样 1364px, 右上角用户头像/退出菜单被推到 536px 之外;
+  //   而 documentElement.scrollWidth === clientWidth, 即「没有横向滚动条」
+  //   —— 内容不是溢出, 是彻底不可达。
+  // 这是 patch 01 修的 min-height:0 在水平方向上的完全对应物。
+  // 加上 min-width:0 后它重新可收缩, 宽表随即由 el-table 自己的
+  // body-wrapper (overflow-x:auto) 横向滚动 —— 这才是 Element UI 的预期行为。
+  min-width: 0;
   margin-left: $sidebar-width;
   display: flex;
   flex-direction: column;
-  min-height: 100vh;
+  height: 100vh;          // ✨ 由 min-height 改为 height：给 flex 子项确定的主尺寸
+  min-height: 0;          // ✨ 允许被内容压缩，否则 flex 子项不会出现滚动条
   transition: margin-left 0.25s ease;
 
   .sidebar.collapsed ~ & {
@@ -600,6 +758,8 @@ $dark-text-secondary: #8b949e;
 // ✨ 顶部栏 - 深色主题 @yutiansut @quantaxis
 .top-header {
   height: $header-height;
+  flex-shrink: 0;         // ✨ 顶栏不参与纵向压缩, 高度恒为 56px (布局预算的依据)
+  min-width: 0;           // ✨ 允许横向收缩, 否则右侧用户菜单会把整行撑出视口
   background: $dark-bg-secondary;
   border-bottom: 1px solid $dark-border;
   display: flex;
@@ -612,7 +772,14 @@ $dark-text-secondary: #8b949e;
 }
 
 .header-left {
+  display: flex;
+  align-items: center;
+  min-width: 0;           // ✨ 允许标题在窄屏被省略号截断而不是撑宽顶栏
+
   .page-title {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
     font-size: 18px;
     font-weight: 600;
     color: $dark-text-primary;
@@ -712,8 +879,11 @@ $dark-text-secondary: #8b949e;
 // 内容区域
 .content-wrapper {
   flex: 1;
+  min-height: 0;          // ✨ 关键：flex item 默认 min-height:auto 会撑破容器，
+                          //    导致 overflow 永不触发（整页无滚动条的根因）
   padding: 20px;
-  overflow: auto;
+  overflow-y: auto;
+  overflow-x: hidden;
 }
 
 // 页面过渡
@@ -730,6 +900,7 @@ $dark-text-secondary: #8b949e;
 // ✨ 公告通知栏样式 @yutiansut @quantaxis
 .announcement-bar {
   height: 40px;
+  flex-shrink: 0;         // ✨ 公告条高度恒为 40px, 否则 --qa-content-h 算不准
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -825,13 +996,31 @@ $dark-text-secondary: #8b949e;
 }
 
 // 响应式
+// ✨ 窄屏改为「抽屉式」侧边栏 @yutiansut @quantaxis
+// 原来的做法是把 sidebar 压到 64px, 内容区再让出 64px。在 768px 宽的屏幕上
+// 这 64px 是 8.3% 的可用宽度, 却只能显示图标; 内容区反而更挤。
+// 改成: 侧边栏整体移出视口, 需要时浮在内容之上(带遮罩), 内容区拿回全部宽度。
 @media (max-width: 768px) {
   .sidebar {
-    width: $sidebar-collapsed-width;
+    // 抽屉展开时给足 220px 显示完整菜单文字
+    width: $sidebar-width;
+    transform: translateX(-100%);
+    transition: transform 0.25s ease, width 0.25s ease;
+    box-shadow: 4px 0 24px rgba(0, 0, 0, 0.6);
+
+    &.collapsed {
+      width: $sidebar-width;
+    }
   }
 
-  .main-container {
-    margin-left: $sidebar-collapsed-width;
+  .layout.drawer-open .sidebar {
+    transform: translateX(0);
+  }
+
+  // ✨ 内容区不再被侧边栏挤压, 拿回整整 64px
+  .main-container,
+  .collapsed ~ .main-container {
+    margin-left: 0;
   }
 
   .content-wrapper {
@@ -840,6 +1029,64 @@ $dark-text-secondary: #8b949e;
 
   .status-indicator {
     display: none;
+  }
+
+  // 抽屉里的折叠按钮改为「关闭」语义, 顶栏那个按钮才是入口
+  .sidebar-footer {
+    display: none;
+  }
+}
+
+// ✨ 补齐中间断点 @yutiansut @quantaxis
+// 原来全仓库只有 768px 一个断点(共 12 处 @media, 34 个 .vue 一处都没有),
+// 1024 / 1366 / 1440 这些最常见的笔记本分辨率完全没有任何适配。
+// 断点对齐 Element UI 栅格: lg < 1200 / md < 992 / xs < 768。
+
+// lg 以下 (<1200px): 顶栏瘦身, 让出宽度给内容
+@media (max-width: 1199px) {
+  .top-header {
+    padding: 0 14px;
+  }
+
+  .header-right {
+    gap: 12px;
+  }
+
+  // 用户名/角色两行文字在窄屏没有信息价值, 头像+下拉已足够
+  .user-details {
+    display: none;
+  }
+}
+
+// md 以下 (<992px): 去掉纯装饰性的系统状态指示, 收紧 padding
+@media (max-width: 991px) {
+  .status-indicator {
+    display: none;
+  }
+
+  .content-wrapper {
+    padding: 14px;
+  }
+
+  .layout {
+    --qa-content-pad: 14px;   // ✨ 预算变量跟着 padding 一起改, 否则各页算高会偏 12px
+  }
+
+  .header-left .page-title {
+    font-size: 16px;
+  }
+}
+
+// xs (<768px): 内容区 padding 与原有 768 断点保持一致(12px), 同步预算变量
+@media (max-width: 768px) {
+  .layout {
+    --qa-content-pad: 12px;
+    // ✨ 抽屉式侧边栏浮在内容之上, 不占用内容宽度, 所以预算里侧边栏记 0
+    --qa-sidebar-w: 0px;
+  }
+
+  .layout.sidebar-collapsed {
+    --qa-sidebar-w: 0px;
   }
 }
 </style>

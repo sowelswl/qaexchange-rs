@@ -6870,6 +6870,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "pythonize"
+version = "0.25.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "597907139a488b22573158793aa7539df36ae863eba300c75f3a0d65fc475e27"
+dependencies = [
+ "pyo3",
+ "serde",
+]
+
+[[package]]
 name = "qa-rs"
 version = "0.1.0"
 dependencies = [
@@ -6921,6 +6931,7 @@ dependencies = [
  "pyo3",
  "pyo3-macros",
  "pyo3-polars",
+ "pythonize",
  "qadataswap",
  "quadprog",
  "quanta",

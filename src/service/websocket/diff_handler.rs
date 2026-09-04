@@ -492,7 +492,10 @@ impl DiffHandler {
                     "orderbook".to_string(),
                     "tick".to_string(),
                     "last_price".to_string(),
-                    "kline".to_string(), // ✨ 新增：订阅K线完成事件
+                    // ✨ 频道名必须与 broadcaster.rs:470 发出的完全一致 —— 过滤是精确
+                    // 字符串相等 (broadcaster.rs:493 `ch == channel`),写成 "kline"
+                    // 永远匹配不上,DIFF 客户端一根 K 线都收不到。@yutiansut @quantaxis
+                    "kline_finished".to_string(),
                 ],
             );
 
@@ -1388,21 +1391,34 @@ impl Actor for DiffWebsocketSession {
     type Context = ws::WebsocketContext<Self>;
 
     fn started(&mut self, ctx: &mut Self::Context) {
+        let n = crate::service::websocket::ws_connection_opened();
+        log::debug!("WS 连接 +1 → {}", n);
         log::info!("DIFF WebSocket session {} started", self.session_id);
         self.start_heartbeat(ctx);
     }
 
     fn stopped(&mut self, _ctx: &mut Self::Context) {
+        let n = crate::service::websocket::ws_connection_closed();
+        log::debug!("WS 连接 -1 → {}", n);
         log::info!("DIFF WebSocket session {} stopped", self.session_id);
 
-        // 清理用户快照
+        // ✨ 从行情广播器注销 @yutiansut @quantaxis
+        // subscribe_quote(`:488`)以 user_id 为键订阅,原来断开时不注销。
         if let Some(ref user_id) = self.user_id {
-            let snapshot_mgr = self.diff_handler.snapshot_mgr.clone();
-            let user_id = user_id.clone();
+            if let Some(ref broadcaster) = self.diff_handler.market_broadcaster {
+                broadcaster.unsubscribe(user_id);
+            }
+        }
 
-            tokio::spawn(async move {
-                snapshot_mgr.remove_user(&user_id).await;
-            });
+        // 清理用户快照
+        //
+        // ⚠️ 这里**不能** tokio::spawn。`stopped()` 是同步生命周期钩子,
+        // System 关停或跨线程 drop 时当前线程没有 tokio reactor,
+        // spawn 会 panic 掉整个 arbiter → HTTP 服务停止监听。
+        // remove_user 本身只是 DashMap::remove(已去掉多余的 async),直接调。
+        // @yutiansut @quantaxis
+        if let Some(ref user_id) = self.user_id {
+            self.diff_handler.snapshot_mgr.remove_user(user_id);
         }
     }
 }

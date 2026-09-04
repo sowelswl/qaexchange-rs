@@ -404,6 +404,8 @@ impl Actor for WsSession {
     type Context = ws::WebsocketContext<Self>;
 
     fn started(&mut self, ctx: &mut Self::Context) {
+        let n = crate::service::websocket::ws_connection_opened();
+        log::debug!("WS 连接 +1 → {}", n);
         log::info!("WebSocket session {} started", self.id);
 
         // 注册到会话映射
@@ -469,11 +471,31 @@ impl Actor for WsSession {
     }
 
     fn stopped(&mut self, _ctx: &mut Self::Context) {
+        let n = crate::service::websocket::ws_connection_closed();
+        log::debug!("WS 连接 -1 → {}", n);
         log::info!("WebSocket session {} stopped", self.id);
 
         // 从会话映射注销
         if let Some(ref sessions) = self.sessions {
             sessions.write().remove(&self.id);
+        }
+
+        // ✨ 必须同时从行情广播器注销 @yutiansut @quantaxis
+        //
+        // 原实现只摘 sessions,不动 MarketDataBroadcaster.subscribers。
+        // 全库没有任何 `impl Drop`,唯一的 unsubscribe 调用在显式 Unsubscribe
+        // 消息分支里(`:337`,还有 is_empty() 前置条件),所以正常断开
+        // **永久残留一条订阅**。
+        //
+        // 实测(隔离实例,120 次 连接→订阅→断开):
+        //   订阅计数 330 → 450,退订计数恒为 0,会话停止日志 330 条
+        //   RSS 2,118,504 kB → 2,279,840 kB  (+161 MB,≈1.3 MB/次)
+        //   静置 30s 不回落(仅 +792 kB 漂移)—— 是泄漏不是瞬时分配
+        //
+        // 而 broadcast() 每个事件都要遍历整张 subscribers 表
+        // (broadcaster.rs:478),所以每事件成本随历史连接数单调增长。
+        if let Some(ref broadcaster) = self.market_broadcaster {
+            broadcaster.unsubscribe(&self.id);
         }
     }
 }

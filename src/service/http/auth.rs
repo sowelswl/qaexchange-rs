@@ -273,3 +273,135 @@ pub async fn make_admin(
         }
     }
 }
+
+// ============================================================================
+// 管理端鉴权中间件 @yutiansut @quantaxis
+//
+// ⚠️ 背景:权限模型完整存在但从未接入 HTTP 层。
+//    UserManager::user_has_permission / is_user_admin / user_has_role
+//    全部只有 #[cfg(test)] 调用(user_manager.rs 的 #[cfg(test)] 在 :517,
+//    这些函数的全部引用都在 1125 行之后)。routes.rs 也没有任何鉴权 wrap。
+//    实测:普通用户(roles=['Trader'], is_admin=false),甚至**不带 token**,
+//    直接 POST /api/admin/instrument/create 返回 200。
+//
+// 本中间件把已有的 verify_token + is_user_admin 接到 /api/admin 与 /api/management。
+// ============================================================================
+
+use actix_web::body::{BoxBody, EitherBody};
+use actix_web::dev::{forward_ready, Service, ServiceRequest, ServiceResponse, Transform};
+use actix_web::Error as ActixError;
+use futures::future::{ok, LocalBoxFuture, Ready};
+
+/// 管理端鉴权:要求 `Authorization: Bearer <token>` 且该用户是管理员
+#[derive(Clone)]
+pub struct AdminAuth {
+    user_mgr: Arc<crate::user::UserManager>,
+    /// 关闭时完全放行(保持既有行为),便于灰度上线
+    enabled: bool,
+}
+
+impl AdminAuth {
+    pub fn new(user_mgr: Arc<crate::user::UserManager>, enabled: bool) -> Self {
+        Self { user_mgr, enabled }
+    }
+}
+
+impl<S, B> Transform<S, ServiceRequest> for AdminAuth
+where
+    S: Service<ServiceRequest, Response = ServiceResponse<B>, Error = ActixError> + 'static,
+    B: 'static,
+{
+    type Response = ServiceResponse<EitherBody<B, BoxBody>>;
+    type Error = ActixError;
+    type Transform = AdminAuthMiddleware<S>;
+    type InitError = ();
+    type Future = Ready<std::result::Result<Self::Transform, Self::InitError>>;
+
+    fn new_transform(&self, service: S) -> Self::Future {
+        ok(AdminAuthMiddleware {
+            service: Arc::new(service),
+            user_mgr: self.user_mgr.clone(),
+            enabled: self.enabled,
+        })
+    }
+}
+
+pub struct AdminAuthMiddleware<S> {
+    service: Arc<S>,
+    user_mgr: Arc<crate::user::UserManager>,
+    enabled: bool,
+}
+
+impl<S, B> Service<ServiceRequest> for AdminAuthMiddleware<S>
+where
+    S: Service<ServiceRequest, Response = ServiceResponse<B>, Error = ActixError> + 'static,
+    B: 'static,
+{
+    type Response = ServiceResponse<EitherBody<B, BoxBody>>;
+    type Error = ActixError;
+    type Future = LocalBoxFuture<'static, std::result::Result<Self::Response, Self::Error>>;
+
+    forward_ready!(service);
+
+    fn call(&self, req: ServiceRequest) -> Self::Future {
+        let svc = self.service.clone();
+        let user_mgr = self.user_mgr.clone();
+        let enabled = self.enabled;
+
+        Box::pin(async move {
+            if !enabled {
+                return Ok(svc.call(req).await?.map_into_left_body());
+            }
+
+            let deny = |req: ServiceRequest, code: u16, msg: &str| {
+                let body = serde_json::json!({
+                    "success": false, "data": null,
+                    "error": { "code": code, "message": msg }
+                });
+                let resp = if code == 401 {
+                    HttpResponse::Unauthorized().json(body)
+                } else {
+                    HttpResponse::Forbidden().json(body)
+                };
+                Ok(req.into_response(resp).map_into_right_body())
+            };
+
+            let token = req
+                .headers()
+                .get("Authorization")
+                .and_then(|v| v.to_str().ok())
+                .and_then(|s| s.strip_prefix("Bearer "))
+                .map(|s| s.to_string());
+
+            let token = match token {
+                Some(t) if !t.is_empty() => t,
+                _ => return deny(req, 401, "Missing or malformed Authorization header"),
+            };
+
+            let user_id = match user_mgr.verify_token(&token) {
+                Ok(uid) => uid,
+                Err(e) => {
+                    let m = format!("Invalid token: {}", e);
+                    return deny(req, 401, &m);
+                }
+            };
+
+            match user_mgr.is_user_admin(&user_id) {
+                Ok(true) => Ok(svc.call(req).await?.map_into_left_body()),
+                Ok(false) => {
+                    log::warn!(
+                        "Admin endpoint denied for non-admin user {}: {} {}",
+                        user_id,
+                        req.method(),
+                        req.path()
+                    );
+                    deny(req, 403, "Admin role required")
+                }
+                Err(e) => {
+                    let m = format!("Authorization check failed: {}", e);
+                    deny(req, 403, &m)
+                }
+            }
+        })
+    }
+}

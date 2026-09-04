@@ -8,7 +8,7 @@
     <div class="monitoring-content" v-loading="loading">
       <!-- 系统状态卡片 -->
       <el-row :gutter="20" class="status-cards">
-        <el-col :span="6">
+        <el-col :xs="24" :sm="12" :lg="6">
           <el-card class="status-card">
             <div class="status-item">
               <div class="status-icon running">
@@ -22,21 +22,33 @@
             </div>
           </el-card>
         </el-col>
-        <el-col :span="6">
+        <el-col :xs="24" :sm="12" :lg="6">
           <el-card class="status-card">
             <div class="status-item">
               <div class="status-icon running">
                 <i class="el-icon-document"></i>
               </div>
               <div class="status-info">
-                <h3>总订单数</h3>
+                <!-- ⚠️ 口径:本数字来自 /api/monitoring/orders,统计的是各账户
+                     QIFI dailyorders —— **含全部历史**(已撤、已成交都算)。
+                     「全市场行情」页的「活跃订单」只含当前在册,
+                     两者可以相差数倍,都不是错的。@yutiansut @quantaxis -->
+                <h3>
+                  总订单数（历史累计）
+                  <el-tooltip
+                    content="含已撤单与已成交的全部历史订单。当前在册数量请看「全市场行情」页"
+                    placement="top"
+                  >
+                    <i class="el-icon-question" style="color:#909399;font-size:12px;cursor:help;"></i>
+                  </el-tooltip>
+                </h3>
                 <p class="status-value">{{ monitoringData.orders ? monitoringData.orders.total_count : 0 }}</p>
                 <p class="status-sub">待成交: {{ monitoringData.orders ? monitoringData.orders.pending_count : 0 }}</p>
               </div>
             </div>
           </el-card>
         </el-col>
-        <el-col :span="6">
+        <el-col :xs="24" :sm="12" :lg="6">
           <el-card class="status-card">
             <div class="status-item">
               <div class="status-icon success">
@@ -50,7 +62,7 @@
             </div>
           </el-card>
         </el-col>
-        <el-col :span="6">
+        <el-col :xs="24" :sm="12" :lg="6">
           <el-card class="status-card">
             <div class="status-item">
               <div class="status-icon info">
@@ -68,7 +80,7 @@
 
       <!-- 详细统计 -->
       <el-row :gutter="20" style="margin-top: 20px;">
-        <el-col :span="12">
+        <el-col :xs="24" :md="12">
           <el-card>
             <div slot="header">
               <span>资金统计</span>
@@ -95,7 +107,7 @@
             </div>
           </el-card>
         </el-col>
-        <el-col :span="12">
+        <el-col :xs="24" :md="12">
           <el-card>
             <div slot="header">
               <span>订单统计</span>
@@ -131,25 +143,25 @@
             </div>
             <div class="stats-content">
               <el-row :gutter="20">
-                <el-col :span="6">
+                <el-col :xs="12" :sm="6">
                   <div class="stat-item">
                     <span class="stat-label">总任务数:</span>
                     <span class="stat-value">{{ monitoringData.storage && monitoringData.storage.olap ? monitoringData.storage.olap.total_tasks : 0 }}</span>
                   </div>
                 </el-col>
-                <el-col :span="6">
+                <el-col :xs="12" :sm="6">
                   <div class="stat-item">
                     <span class="stat-label">待转换:</span>
                     <span class="stat-value warning">{{ monitoringData.storage && monitoringData.storage.olap ? monitoringData.storage.olap.pending_tasks : 0 }}</span>
                   </div>
                 </el-col>
-                <el-col :span="6">
+                <el-col :xs="12" :sm="6">
                   <div class="stat-item">
                     <span class="stat-label">成功:</span>
                     <span class="stat-value success">{{ monitoringData.storage && monitoringData.storage.olap ? monitoringData.storage.olap.success_tasks : 0 }}</span>
                   </div>
                 </el-col>
-                <el-col :span="6">
+                <el-col :xs="12" :sm="6">
                   <div class="stat-item">
                     <span class="stat-label">失败:</span>
                     <span class="stat-value danger">{{ monitoringData.storage && monitoringData.storage.olap ? monitoringData.storage.olap.failed_tasks : 0 }}</span>

@@ -172,6 +172,52 @@ impl WebSocketServer {
 }
 
 /// WebSocket 路由处理函数
+// ==================== WebSocket 连接计数 ====================
+// @yutiansut @quantaxis
+//
+// ⚠️ 为什么是全局静态而不是放 AppState:
+// WS 服务器(8095)在 main.rs:868 建的是**独立的 App**,只注入了 ws_server,
+// 拿不到 HTTP 应用(8094)的 AppState —— 而 `AppState::ws_connection_count`
+// 就住在那里。所以它被创建(main.rs:725)、被读取(monitoring.rs:503),
+// 却**从来没有任何地方 +1/-1**,系统总览永远显示 0 连接
+// (实测 8095 上 8 个 ESTABLISHED,接口报 0)。
+//
+// 跨 App 共享在本项目已有先例:`GLOBAL_SNAPSHOT_MANAGER`
+// (account_admin.rs:49,同样是 WS 侧设置、HTTP 侧读取)。计数器是
+// const 可构造的,连 OnceCell 都不需要。
+static WS_CONNECTION_COUNT: std::sync::atomic::AtomicUsize =
+    std::sync::atomic::AtomicUsize::new(0);
+
+/// 会话建立时调用
+pub fn ws_connection_opened() -> usize {
+    WS_CONNECTION_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1
+}
+
+/// 会话结束时调用
+///
+/// 用 CAS 循环而不是 `fetch_sub` —— usize 减到 0 以下会**回绕成天文数字**,
+/// 界面会显示 18446744073709551615 连接。宁可少减,不可回绕。
+pub fn ws_connection_closed() -> usize {
+    use std::sync::atomic::Ordering;
+    let mut cur = WS_CONNECTION_COUNT.load(Ordering::Relaxed);
+    loop {
+        if cur == 0 {
+            log::warn!("ws_connection_closed 在计数为 0 时被调用(重复关闭?)");
+            return 0;
+        }
+        match WS_CONNECTION_COUNT.compare_exchange_weak(
+            cur, cur - 1, Ordering::Relaxed, Ordering::Relaxed) {
+            Ok(_) => return cur - 1,
+            Err(actual) => cur = actual,
+        }
+    }
+}
+
+/// 当前活跃 WebSocket 连接数
+pub fn ws_connection_count() -> usize {
+    WS_CONNECTION_COUNT.load(std::sync::atomic::Ordering::Relaxed)
+}
+
 pub async fn ws_route(
     req: HttpRequest,
     stream: web::Payload,

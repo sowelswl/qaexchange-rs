@@ -211,8 +211,11 @@ impl LeveledCompaction {
         let deleted_count = 0u64; // TODO: 统计删除的记录
 
         // 写入新的 SSTable
-        let mut writer = RkyvSSTableWriter::create(&task.output_path)
-            .map_err(|e| format!("Failed to create SSTable writer: {}", e))?;
+        // ✨ 按真实条目数建 Bloom Filter —— compaction 输出往往是 L0 的数十倍,
+        // 用写死的 10000 会让误判率接近 100%。@yutiansut @quantaxis
+        let mut writer =
+            RkyvSSTableWriter::create_with_capacity(&task.output_path, entries.len().max(1))
+                .map_err(|e| format!("Failed to create SSTable writer: {}", e))?;
 
         for (key, value) in &entries {
             writer

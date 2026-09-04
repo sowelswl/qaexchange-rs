@@ -69,6 +69,92 @@ html, body {
   border-color: $error-color;
 }
 
+// ✨ 默认按钮 —— 此前**全局零覆盖**,呈 Element 默认白底 @yutiansut @quantaxis
+//
+// primary / success / danger 都有规则,唯独漏了最常用的 default。
+// 实测:8 个页面出现 button.el-button--default 呈 rgb(255,255,255),
+// 尺寸多为 73×32(「查询」「刷新」「重置」这类操作按钮)。
+.el-button--default {
+  background-color: $dark-bg-tertiary;
+  border-color: $dark-border;
+  color: $dark-text-primary;
+
+  &:hover, &:focus {
+    background-color: $dark-bg-card;
+    border-color: $primary-color;
+    color: $primary-color;
+  }
+
+  &.is-disabled,
+  &.is-disabled:hover {
+    background-color: $dark-bg-secondary;
+    border-color: $dark-border;
+    color: $dark-text-muted;
+  }
+}
+
+// 文字按钮:仅前景色
+.el-button--text {
+  color: $primary-color;
+
+  &:hover, &:focus { color: $primary-light; }
+  &.is-disabled { color: $dark-text-muted; }
+}
+
+// ✨ 日期区间输入框本体 —— 与 el-input__inner 同级但类名不同
+// 实测审计日志页 input.el-range-input ×2 呈 rgb(255,255,255)
+.el-range-editor,
+.el-date-editor--daterange,
+.el-date-editor--datetimerange {
+  background-color: $dark-bg-tertiary !important;
+  border-color: $dark-border !important;
+
+  .el-range-input {
+    background-color: transparent;
+    color: $dark-text-primary;
+
+    &::placeholder { color: $dark-text-muted; }
+  }
+
+  .el-range-separator { color: $dark-text-secondary; }
+  .el-range__icon, .el-range__close-icon { color: $dark-text-secondary; }
+}
+
+// ✨ 普通 el-tabs(非 border-card)—— 市场总览页用的是这种
+// 实测 div.el-tabs 1172×578 呈 rgb(255,255,255)
+.el-tabs {
+  background-color: transparent;
+
+  .el-tabs__header { background-color: transparent; }
+  .el-tabs__nav-wrap { background-color: transparent; }
+  .el-tabs__content { background-color: transparent; }
+
+  .el-tabs__item {
+    background-color: transparent;
+    color: $dark-text-secondary;
+
+    &:hover { color: $dark-text-primary; }
+    &.is-active { color: $primary-color; }
+    &.is-disabled { color: $dark-text-muted; }
+  }
+}
+
+// ✨ 分页的上一页/下一页按钮 —— 全局零覆盖
+// 实测 button.btn-next 36×28 呈 rgb(255,255,255)
+.el-pagination {
+  button.btn-prev,
+  button.btn-next {
+    background-color: $dark-bg-tertiary;
+    color: $dark-text-secondary;
+
+    &:hover:not(:disabled) { color: $primary-color; }
+    &:disabled { background-color: $dark-bg-secondary; color: $dark-text-muted; }
+  }
+
+  .el-pagination__total,
+  .el-pagination__jump { color: $dark-text-secondary; }
+}
+
 // ✨ 输入框 - 深色主题 @yutiansut @quantaxis
 .el-input__inner {
   border-radius: $radius-sm;
@@ -183,6 +269,54 @@ html, body {
   // 空数据提示
   .el-table__empty-text {
     color: $dark-text-muted;
+  }
+
+  .el-table__empty-block {
+    background-color: $dark-bg-secondary;
+  }
+
+  // ✨ 固定列相关层 —— 白色突兀的真正来源 @yutiansut @quantaxis
+  //
+  // Element UI 2.15 给这几个元素写死了亮色,而本文件此前对
+  // `.el-table__fixed*` **一条规则都没有**:
+  //   .el-table__fixed-right-patch                     → #FFF
+  //   .el-table__fixed-right::before / __fixed::before → #EBEEF5
+  //   .el-table__fixed-footer-wrapper tbody td         → #F5F7FA
+  //
+  // 其中 `-patch` 是**表头右上角的一小块方块**(固定列的占位补丁),
+  // 纯白配深色表头极其扎眼。实测 5 个页面全部命中
+  // rgb(255,255,255),而相邻表头是 rgb(33,38,45)。
+  // 全站 10 个页面用了 fixed 列。
+  //
+  // 固定列容器本身是独立 DOM 层(浮在主表格之上),不继承 .el-table 的
+  // 背景 —— 必须显式覆盖,否则透明处会露出下面的亮色 patch。
+  .el-table__fixed-right-patch {
+    background-color: $dark-bg-tertiary !important;
+    border-bottom: 1px solid $dark-border;
+  }
+
+  .el-table__fixed,
+  .el-table__fixed-right {
+    background-color: transparent;
+
+    // 固定列的投影分隔条
+    &::before {
+      background-color: $dark-border !important;
+    }
+  }
+
+  .el-table__fixed-header-wrapper th.el-table__cell {
+    background-color: $dark-bg-tertiary !important;
+  }
+
+  .el-table__fixed-body-wrapper td.el-table__cell {
+    background-color: $dark-bg-secondary !important;
+  }
+
+  .el-table__fixed-footer-wrapper tbody td.el-table__cell {
+    background-color: $dark-bg-tertiary !important;
+    color: $dark-text-primary !important;
+    border-top: 1px solid $dark-border;
   }
 
   // 表格内部背景
@@ -310,6 +444,60 @@ html, body {
 
   .el-date-table th {
     color: $dark-text-secondary;
+  }
+
+  // ✨ 面板内的小元素 —— 实测漏项 @yutiansut @quantaxis
+  //
+  // 面板主体已是深色 rgb(22,27,34),但下面这些 Element 写死了深灰前景,
+  // 配深底等于看不见。实测(审计日志页打开日期选择器):
+  //   button.el-picker-panel__icon-btn  ×4  fg=rgb(48,49,51)   ← 翻月/翻年箭头
+  //   span.el-icon-arrow-right          ×1  fg=rgb(48,49,51)   ← 区间分隔箭头
+  //   button.el-button                  ×1  bg=rgb(255,255,255) ← 底部按钮
+  .el-picker-panel__icon-btn {
+    color: $dark-text-secondary;
+
+    &:hover { color: $primary-color; }
+    &.is-disabled { color: $dark-text-muted; }
+  }
+
+  .el-picker-panel__header,
+  .el-date-range-picker__header {
+    color: $dark-text-primary;
+
+    [class*='el-icon-'] { color: $dark-text-secondary; }
+    div { color: $dark-text-primary; }
+  }
+
+  .el-date-range-picker__content.is-left {
+    border-right-color: $dark-border;
+  }
+
+  .el-date-range-picker__time-header {
+    border-bottom-color: $dark-border;
+
+    .el-icon-arrow-right { color: $dark-text-secondary; }
+  }
+
+  .el-picker-panel__shortcut {
+    color: $dark-text-primary;
+
+    &:hover { color: $primary-color; background: $dark-bg-tertiary; }
+    &.active { background: $dark-bg-tertiary; color: $primary-color; }
+  }
+
+  .el-picker-panel__sidebar {
+    background: $dark-bg-tertiary;
+    border-right-color: $dark-border;
+  }
+
+  // 底部「此刻 / 确定」按钮
+  .el-picker-panel__footer .el-button {
+    background: $dark-bg-tertiary;
+    border-color: $dark-border;
+    color: $dark-text-primary;
+
+    &:hover { border-color: $primary-color; color: $primary-color; }
+    &.is-plain:hover { background: $dark-bg-tertiary; }
   }
 
   .el-date-table td.available {
@@ -477,11 +665,45 @@ html, body {
   border-top-color: $primary-color !important;
 }
 
-// Tag 标签 - 深色主题
-.el-tag--info {
-  background-color: rgba(139, 148, 158, 0.2);
-  border-color: rgba(139, 148, 158, 0.3);
-  color: $dark-text-secondary;
+// ─────────────────────────────────────────────────────────────
+// Tag 标签 - 深色主题  @yutiansut @quantaxis
+//
+// ⚠️ 特异度陷阱:这里原来写的是单类 `.el-tag--info`(0,1,0),而 Element
+// 的规则是**双类** `.el-tag.el-tag--info`(0,2,0) —— 单类永远盖不住,
+// 那条规则从写下起就是死代码。实测侧边栏 ADMIN 徽章仍是 rgb(254,240,240)、
+// 公告条 SYSTEM 标签仍是 rgb(244,244,245),全站每一页都带这两块白。
+// 所以下面一律用双类选择器对齐特异度。
+//
+// 三个变体都要管:
+//   默认(light)  .el-tag / .el-tag.el-tag--xxx     → 浅底 + 深字
+//   plain        .el-tag--plain.el-tag--xxx        → background:#fff(也是白的)
+//   dark         .el-tag--dark.el-tag--xxx         → 实心语义色 + 白字,深色下本就能看,不动
+$tag-tints: (
+  'success': #52c41a,
+  'info':    #8b949e,
+  'warning': #faad14,
+  'danger':  #f5222d
+);
+
+.el-tag {
+  background-color: rgba(24, 144, 255, 0.16);
+  border-color: rgba(24, 144, 255, 0.32);
+  color: #4dabf7;
+}
+
+@each $name, $c in $tag-tints {
+  .el-tag.el-tag--#{$name},
+  .el-tag--plain.el-tag--#{$name} {
+    background-color: rgba($c, 0.16);
+    border-color: rgba($c, 0.34);
+    color: lighten($c, 12%);
+  }
+}
+
+.el-tag--plain {          // plain 的默认(primary)色同样是 #fff 底
+  background-color: rgba(24, 144, 255, 0.10);
+  border-color: rgba(24, 144, 255, 0.32);
+  color: #4dabf7;
 }
 
 // 输入框 placeholder
@@ -730,4 +952,277 @@ html, body {
 .slide-fade-leave-to {
   transform: translateX(-10px);
   opacity: 0;
+}
+
+// ============= 补齐:全局零覆盖的弹出层 @yutiansut @quantaxis =============
+//
+// 这些组件的 DOM 挂在 <body> 下(不在页面组件的 scoped 作用域内),
+// 所以只能靠全局样式。实测缺失清单(grep styles/index.scss 零命中):
+//   el-time-panel / el-cascader__dropdown / el-drawer
+// 而 el-picker-panel 虽有 3 条规则,面板内小元素仍漏(见上方 icon-btn 等)。
+
+.el-time-panel {
+  background: $dark-bg-secondary;
+  border-color: $dark-border;
+
+  .el-time-panel__content::after,
+  .el-time-panel__content::before {
+    border-color: $dark-border;
+  }
+
+  .el-time-spinner__item {
+    color: $dark-text-primary;
+
+    &:hover:not(.disabled):not(.active) { background: $dark-bg-tertiary; }
+    &.active:not(.disabled) { color: $primary-color; }
+    &.disabled { color: $dark-text-muted; }
+  }
+
+  .el-time-panel__footer {
+    border-top-color: $dark-border;
+
+    .el-time-panel__btn { color: $dark-text-secondary; }
+    .el-time-panel__btn.confirm { color: $primary-color; }
+  }
+}
+
+.el-cascader__dropdown,
+.el-cascader-panel {
+  background: $dark-bg-secondary;
+  border-color: $dark-border;
+
+  .el-cascader-menu { border-right-color: $dark-border; }
+  .el-cascader-node {
+    color: $dark-text-primary;
+
+    &:not(.is-disabled):hover { background: $dark-bg-tertiary; }
+    &.in-active-path, &.is-active { color: $primary-color; }
+  }
+}
+
+.el-drawer {
+  background: $dark-bg-card;
+
+  .el-drawer__header { color: $dark-text-primary; }
+  .el-drawer__close-btn { color: $dark-text-secondary; }
+}
+
+// ============= 响应式适配层 @yutiansut @quantaxis =============
+// 本段是全站响应式的「地基」。它只覆盖 Element UI 自带的类名, 因此:
+//   1. 不会和各 SFC 的 <style scoped> 打架 —— scoped 选择器带 [data-v-*],
+//      特异性天然更高, 各页面仍可按需覆盖本段;
+//   2. 改一处即对全站 25+ 个 el-dialog / 23 个 el-form / 23 个 el-table 生效,
+//      不必逐页打补丁。
+// 断点严格对齐 Element UI 栅格 (见 variables.scss):
+//   xs < 768 | sm >= 768 | md >= 992 | lg >= 1200 | xl >= 1920
+
+// ---- 1. 弹窗: 永远不宽于视口 ----
+// 全站 el-dialog 的 width 写死为 400/500/600/700/780/800/900px。
+// Element 把它写成行内 style="width: 900px", 行内样式优先级高于任何类选择器,
+// 但 max-width 是另一个属性, 可以在不加 !important 的前提下把它夹住。
+.el-dialog {
+  max-width: calc(100vw - 32px);
+}
+
+.el-message-box {
+  max-width: calc(100vw - 32px);
+}
+
+// ---- 2. 表格: 窄屏保留横向滚动, 不要压扁列 ----
+// 各页 el-table-column 的固定 width 之和在 1110px ~ 3960px 之间
+// (admin/risk.vue 3960px, admin/market-overview.vue 3630px, orders/positions 1280px),
+// 远超窄屏可用宽度。正确做法是让表格内部横向滚动, 而不是把列压扁。
+// Element 的 body-wrapper 默认已是 overflow-x:auto, 这里只做两件事:
+//   a. 保证它不被祖先的 overflow:hidden 连同滚动条一起裁掉;
+//   b. 深色主题下横向滚动条几乎不可见, 窄屏把它做粗、做亮, 否则用户根本
+//      不知道右边还有内容 —— 这正是「内容显示不全」的主观来源之一。
+.el-table {
+  max-width: 100%;
+
+  .el-table__body-wrapper {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+}
+
+@media (max-width: $bp-lg-max) {
+  .el-table .el-table__body-wrapper {
+    &::-webkit-scrollbar {
+      height: 10px;
+    }
+
+    &::-webkit-scrollbar-thumb {
+      background: lighten($dark-border, 12%);
+      border-radius: 5px;
+
+      &:hover {
+        background: $primary-color;
+      }
+    }
+  }
+}
+
+// ---- 3. 表单: 窄屏标签换行, 固定宽度控件让位 ----
+// 全站 23 处 label-width="80px|100px|120px", 以及大量
+// style="width: 200px|300px" 的 el-select / el-date-picker。
+// 在 xs 断点下把标签顶到控件上方, 控件占满整行。
+@media (max-width: $bp-xs-max) {
+  .el-form:not(.el-form--inline) {
+    .el-form-item__label {
+      width: auto !important;
+      float: none;
+      display: block;
+      text-align: left;
+      padding: 0 0 4px;
+      line-height: 1.5;
+    }
+
+    .el-form-item__content {
+      margin-left: 0 !important;
+    }
+  }
+}
+
+// 行内筛选表单(orders / trades / admin 各页顶部的查询条)在窄屏必须允许换行,
+// 否则最后一组「查询/重置/导出」按钮会被挤出可视区。
+@media (max-width: $bp-md-max) {
+  .el-form--inline {
+    .el-form-item {
+      margin-right: 10px;
+      max-width: 100%;
+    }
+  }
+}
+
+// 行内写死的控件宽度(style="width: 200px" 等)在窄屏夹到容器内。
+// 同样利用 max-width 不与行内 width 冲突的特性, 无需 !important。
+@media (max-width: $bp-sm-max) {
+  .el-select,
+  .el-cascader,
+  .el-date-editor,
+  .el-date-editor.el-input,
+  .el-date-editor.el-input__inner,
+  .el-input-number {
+    max-width: 100%;
+  }
+
+  .el-range-editor.el-input__inner {
+    max-width: 100%;
+  }
+}
+
+// ---- 4. 标签页 / 卡片 / 分页: 窄屏可滚动、少留白 ----
+@media (max-width: $bp-md-max) {
+  .el-tabs__nav-wrap {
+    overflow-x: auto;
+  }
+
+  .el-card__body {
+    padding: 14px;
+  }
+
+  .el-card__header {
+    padding: 12px 14px;
+  }
+}
+
+@media (max-width: $bp-xs-max) {
+  .el-card__body {
+    padding: 10px;
+  }
+
+  // 分页条在窄屏折行而不是溢出
+  .el-pagination {
+    white-space: normal;
+
+    .el-pagination__jump,
+    .el-pagination__sizes {
+      display: none;
+    }
+  }
+}
+
+// ─────────────────────────────────────────────────────────────
+// 表格数字不得中途断行  @yutiansut @quantaxis
+//
+// Element UI 默认 `.el-table .cell { white-space: normal; word-break: break-all }`。
+// 对中文文本合适,对数字是**正确性事故** —— 实测 accounts 页
+// `¥1,999,955,039.15` 在 120px 列里被劈成两行 `¥1,999,955,0` / `39.15`,
+// 行高从 49px 涨到 63px,读起来像两个数。
+//
+// 金额/数量列一律 align="right"(全站 89 处),按这个类收口:
+// 宁可省略号截断(看得出被截),不可断行(看不出被截,且读成别的数)。
+.el-table {
+  td.is-right .cell,
+  th.is-right .cell {
+    white-space: nowrap;
+    word-break: keep-all;
+    font-variant-numeric: tabular-nums;   // 等宽数字,列内数位对齐
+  }
+}
+
+// ─────────────────────────────────────────────────────────────
+// el-tabs 的 border-card 变体  @yutiansut @quantaxis
+//
+// 普通 .el-tabs 上面已收口,但 type="border-card" 是**另一套**选择器,
+// Element 给它单独定义了浅色三件套(element-ui/lib/theme-chalk/index.css):
+//   .el-tabs--border-card                       → background:#FFF
+//   > .el-tabs__header                          → background:#F5F7FA
+//   > .el-tabs__header .el-tabs__item.is-active → background:#FFF
+//                                                 border-left/right-color:#DCDFE6
+// 最后那条边框色就是选中页签两侧那两根白线 —— 只改 .el-tabs__item 的
+// background 盖不住它,必须连边框色一起声明。
+.el-tabs--border-card {
+  background: $dark-bg-secondary;
+  border-color: $dark-border;
+
+  > .el-tabs__header {
+    background-color: $dark-bg-tertiary;
+    border-bottom-color: $dark-border;
+
+    .el-tabs__item {
+      color: $dark-text-secondary;
+      border-color: transparent;
+
+      &.is-active {
+        color: $primary-color;
+        background-color: $dark-bg-secondary;
+        border-left-color: $dark-border;
+        border-right-color: $dark-border;
+      }
+      &:not(.is-disabled):hover { color: $primary-color; }
+    }
+  }
+}
+
+// ─────────────────────────────────────────────────────────────
+// RadioButton 按钮组 - 深色主题  @yutiansut @quantaxis
+//
+// Element 原生 `.el-radio-button__inner { background:#FFF; border:1px solid #DCDFE6;
+// color:#606266 }` —— 全站配色收口后这是最后一处白块(实测 27 路由只剩它)。
+// 选中态 `.is-active .el-radio-button__inner` 是主题色实心,深色下本就能看,
+// 只需要把边框统一。
+.el-radio-button__inner {
+  background: $dark-bg-tertiary;
+  border-color: $dark-border;
+  color: $dark-text-secondary;
+
+  &:hover { color: $primary-color; }
+}
+
+.el-radio-button:first-child .el-radio-button__inner {
+  border-left-color: $dark-border;     // 原生这里单独指定了 border-left
+}
+
+.el-radio-button__orig-radio:checked + .el-radio-button__inner {
+  background-color: $primary-color;
+  border-color: $primary-color;
+  color: #fff;
+  box-shadow: -1px 0 0 0 $primary-color;
+}
+
+.el-radio-button__orig-radio:disabled + .el-radio-button__inner {
+  background-color: $dark-bg-secondary;
+  border-color: $dark-border;
+  color: $dark-text-muted;
 }

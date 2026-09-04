@@ -9,6 +9,8 @@ use std::sync::Arc;
 
 use crate::exchange::instrument_registry::{InstrumentInfo, InstrumentStatus, InstrumentType};
 use crate::exchange::{AccountManager, InstrumentRegistry, SettlementEngine};
+use crate::market::MarketDataService;
+use crate::matching::engine::ExchangeMatchingEngine;
 use crate::ExchangeError;
 
 // ============================================================================
@@ -19,6 +21,10 @@ pub struct AdminAppState {
     pub instrument_registry: Arc<InstrumentRegistry>,
     pub settlement_engine: Arc<SettlementEngine>,
     pub account_mgr: Arc<AccountManager>,
+    /// 撮合引擎 —— 新合约必须在这里建订单簿，否则不可交易 @yutiansut @quantaxis
+    pub matching_engine: Arc<ExchangeMatchingEngine>,
+    /// 行情服务 —— 新合约必须设置昨收盘价，否则涨跌幅算不出来 @yutiansut @quantaxis
+    pub market_data_service: Arc<MarketDataService>,
 }
 
 // ============================================================================
@@ -70,12 +76,26 @@ pub struct CreateInstrumentRequest {
     pub limit_down_rate: f64,
     pub list_date: Option<String>,
     pub expire_date: Option<String>,
+    /// 上市初始价（= 订单簿基准价 / 初始结算价 / 昨收盘价）@yutiansut @quantaxis
+    /// 省略时取 100.0，与 main.rs 启动路径的兜底值一致。
+    pub init_price: Option<f64>,
 }
 
 // 合约更新请求
 #[derive(Debug, Deserialize)]
 pub struct UpdateInstrumentRequest {
+    // ⚠️ 本结构此前只有 7 个字段,而 `CreateInstrumentRequest` 有 12 个 ——
+    // 少了 instrument_type / exchange / list_date / expire_date。
+    // 前端 `admin/instruments.vue:361` 是 `updateInstrument(id, this.form)`
+    // **整表提交**,而后端没有 `deny_unknown_fields`,于是这 4 个字段
+    // **静默丢弃**:管理员改完上市/到期日期点保存,弹「合约更新成功」,值没变。
+    // 4 个字段在 `InstrumentInfo` 里都存在(列表页也在显示),只是 update 不设它们。
+    // 又一处「修了一半」—— create 想到了,update 忘了。@yutiansut @quantaxis
     pub instrument_name: Option<String>,
+    pub instrument_type: Option<InstrumentType>,
+    pub exchange: Option<String>,
+    pub list_date: Option<String>,
+    pub expire_date: Option<String>,
     pub contract_multiplier: Option<i32>,
     pub price_tick: Option<f64>,
     pub margin_rate: Option<f64>,
@@ -123,10 +143,51 @@ pub async fn create_instrument(
     instrument.list_date = req.list_date.clone();
     instrument.expire_date = req.expire_date.clone();
 
-    match state.instrument_registry.register(instrument) {
-        Ok(_) => Ok(HttpResponse::Ok().json(ApiResponse::success(()))),
-        Err(e) => Ok(HttpResponse::BadRequest().json(ApiResponse::<()>::error(e.to_string()))),
+    // 4 步注册，缺一不可 @yutiansut @quantaxis
+    //
+    // 原实现只做了第 1 步（写注册表），结果新合约是「幽灵合约」：
+    //   /api/admin/instruments        → 看得见
+    //   /api/market/instruments       → 看不见（该接口读的是撮合引擎的 orderbooks）
+    //   /api/market/orderbook/{id}    → 500 Instrument not found
+    //   /api/order/submit             → 失败
+    // main.rs 启动路径（instruments 初始化循环）做了全部 4 步，此处对齐它。
+    let init_price = req.init_price.unwrap_or(100.0);
+
+    // 1. 合约注册表（同时负责重复上市的校验）
+    if let Err(e) = state.instrument_registry.register(instrument) {
+        return Ok(HttpResponse::BadRequest().json(ApiResponse::<()>::error(e.to_string())));
     }
+
+    // 2. 撮合引擎建订单簿 —— 没有这步合约就不可交易
+    if let Err(e) = state
+        .matching_engine
+        .register_instrument(req.instrument_id.clone(), init_price)
+    {
+        // 回滚注册表，避免留下一个不可交易的幽灵合约
+        let _ = state.instrument_registry.delist(&req.instrument_id);
+        return Ok(HttpResponse::InternalServerError().json(ApiResponse::<()>::error(format!(
+            "Registered in registry but failed to create orderbook (rolled back): {}",
+            e
+        ))));
+    }
+
+    // 3. 初始结算价
+    state
+        .settlement_engine
+        .set_settlement_price(req.instrument_id.clone(), init_price);
+
+    // 4. 昨收盘价（快照生成器算涨跌幅用）
+    state
+        .market_data_service
+        .set_pre_close(&req.instrument_id, init_price);
+
+    log::info!(
+        "Instrument {} listed @ {} (orderbook + settlement price + pre_close wired)",
+        req.instrument_id,
+        init_price
+    );
+
+    Ok(HttpResponse::Ok().json(ApiResponse::success(())))
 }
 
 /// 更新合约信息
@@ -159,6 +220,19 @@ pub async fn update_instrument(
         }
         if let Some(limit_down) = req.limit_down_rate {
             info.limit_down_rate = limit_down;
+        }
+        // 下面 4 项是本次补齐的(见 UpdateInstrumentRequest 注释)
+        if let Some(t) = req.instrument_type {
+            info.instrument_type = t;
+        }
+        if let Some(ex) = &req.exchange {
+            info.exchange = ex.clone();
+        }
+        if let Some(d) = &req.list_date {
+            info.list_date = Some(d.clone());
+        }
+        if let Some(d) = &req.expire_date {
+            info.expire_date = Some(d.clone());
         }
     });
 

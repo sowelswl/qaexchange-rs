@@ -50,6 +50,28 @@ use std::io;
 use std::path::PathBuf;
 use std::sync::Arc;
 
+/// 把 actix 提取器（Json / Query / Path）产生的 400 统一包成
+/// `{ success, data, error }` 信封。
+///
+/// 默认情况下 actix 直接返回 `text/plain` 裸文本（例如
+/// `Json deserialize error: missing field ...`），前端 `web/src/api/request.js`
+/// 的响应拦截器读不到 `error.message`，用户只会看到
+/// "Request failed with status code 400"。@yutiansut @quantaxis
+fn extractor_error<E>(err: E, _req: &actix_web::HttpRequest) -> actix_web::Error
+where
+    E: std::fmt::Debug + std::fmt::Display + 'static,
+{
+    let msg = err.to_string();
+    log::warn!("Request rejected by extractor: {}", msg);
+    actix_web::error::InternalError::from_response(
+        err,
+        actix_web::HttpResponse::BadRequest().json(
+            qaexchange::service::http::models::ApiResponse::<()>::error(400, msg),
+        ),
+    )
+    .into()
+}
+
 /// 交易所服务配置
 #[derive(Debug, Clone)]
 struct ExchangeConfig {
@@ -207,7 +229,14 @@ impl ExchangeServer {
         let instrument_registry = Arc::new(InstrumentRegistry::new());
 
         // 1.3 创建交易网关并设置通知系统和成交记录器
-        let mut trade_gateway_inner = TradeGateway::new(account_mgr.clone());
+        // ✨ WAL 根目录必须显式给,不能用默认值 @yutiansut @quantaxis
+        //
+        // TradeGateway 的默认 wal_root 是 `"./data/wal"`（trade_gateway.rs:156）——
+        // **相对当前工作目录**。`with_wal_root`（:180）此前只有 #[cfg(test)] 调用，
+        // 生产从不设置，于是这 554MB 数据的落点取决于你从哪个目录启动进程。
+        // 挂到 storage_path 下，与其余存储同处一棵树。
+        let mut trade_gateway_inner = TradeGateway::new(account_mgr.clone())
+            .with_wal_root(format!("{}/gateway_wal", config.storage_path));
         trade_gateway_inner.set_notification_broker(notification_broker.clone());
 
         // 从 matching_engine 获取 trade_recorder 并设置到 trade_gateway
@@ -335,11 +364,47 @@ impl ExchangeServer {
             );
         }
 
+        // 3.9 交易时段管制 @yutiansut @quantaxis
+        //
+        // OrderRouter::trading_state_machine 默认是 None(:310,:411),
+        // 而 set_trading_state_machine(:325) **全库零调用** —— 连测试都没有,
+        // main.rs 里 TradingStateMachine/TradingSessionManager/trading_session
+        // 三个词出现 0 次。于是 :476 那个时段门禁永远进不去:
+        // **7×24 都能下单,没有集合竞价/午休/收盘之分。**
+        //
+        // validate_order(trading_session.rs:461)本身是完整的:
+        // 先查交易日历当前时段的 allow_order,再查合约的 TradingState。
+        //
+        // ⚠️ 默认**关闭**:打开后非交易时段的下单会被拒(错误码 4100),
+        // 现有的 7×24 压测脚本会立刻大面积失败。
+        // 设 QAEX_ENFORCE_TRADING_SESSION=1 打开。
+        if std::env::var("QAEX_ENFORCE_TRADING_SESSION")
+            .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+            .unwrap_or(false)
+        {
+            order_router.set_trading_state_machine(Arc::new(
+                qaexchange::exchange::TradingStateMachine::new(),
+            ));
+            log::info!("🕐 Trading session enforcement ENABLED (orders rejected outside session hours)");
+        } else {
+            log::info!("Trading session enforcement disabled (set QAEX_ENFORCE_TRADING_SESSION=1 to enable)");
+        }
+
         let order_router = Arc::new(order_router);
 
         // 4. 创建结算引擎
         let settlement_engine = Arc::new(SettlementEngine::new(account_mgr.clone()));
         settlement_engine.set_order_router(order_router.clone());
+
+        // ✨ 条件单引擎也需要 order_router @yutiansut @quantaxis
+        //
+        // ConditionalOrderEngine::set_order_router(conditional_order.rs:121)
+        // 此前**从未在生产调用**,`self.order_router` 恒为 None,
+        // 于是 check_triggers 里的 `if let Some(router)` 分支永远进不去 ——
+        // 就算触发了也不会真的下单。
+        qaexchange::exchange::CONDITIONAL_ORDER_ENGINE
+            .write()
+            .set_order_router(order_router.clone());
 
         // 5. 创建资金管理器
         let capital_mgr = Arc::new(CapitalManager::new(account_mgr.clone()));
@@ -347,6 +412,15 @@ impl ExchangeServer {
         // 6. 创建风险监控器
         let risk_monitor = Arc::new(RiskMonitor::new(account_mgr.clone()));
         settlement_engine.set_risk_monitor(risk_monitor.clone());
+        // ✨ 接入行情源,启用盯市刷价 @yutiansut @quantaxis
+        //
+        // 此前行情侧与账户侧之间**没有任何连线**:
+        //   · market/{mod,snapshot_generator,kline_actor} 涉及账户 0 处
+        //   · MarketDataBroadcaster 的生产订阅者只有 kline_actor(画K线)
+        //   · qars `on_price_change` 生产调用只在 receive_deal_sim(用成交价)
+        // 结果是持仓价停在各账户最后一次成交时,全系统
+        // Σposition_profit = +2.53 亿(封闭系统应为 0)。
+        risk_monitor.set_price_source(matching_engine.clone());
 
         // 7. 创建市场数据服务（包含快照生成器）
         let market_data_service = {
@@ -524,6 +598,48 @@ impl ExchangeServer {
             self.market_data_service
                 .set_pre_close(&inst.instrument_id, init_price);
 
+            // ✨ 费率一致性校验 @yutiansut @quantaxis
+            //
+            // 本系统有**四套**费率数据源,分工其实是合理的:
+            //   · instrument_registry     → 下单前资金预检(pre_trade_check / order_router)
+            //   · qars MarketPreset       → **真正冻结与扣费**(calc_coeff / calc_commission)
+            //   · account-admin 费率接口  → 管理页展示(品种级 CTP 格式)
+            // 问题在于三者之间**没有任何一致性约束**:
+            //   实测 registry.margin_rate = 0.12 而 qars buy_frozen_coeff = 0.1,
+            //   预检偏严 20% —— 方向恰好安全,但那是巧合。
+            //   若有人把 registry 调到 0.08,预检就会放行实际开不出的仓。
+            //   (2026-09-04 我自己写验证判据时也拿错了源,预期值算成 142,481
+            //    而实际是 114,000 —— 连排查者都会踩,说明必须有显式约束。)
+            //
+            // 这里只告警不阻断:preset 是品种级预设,registry 是合约级配置,
+            // 允许按合约微调,但偏离过大几乎总是配错了。
+            {
+                let preset = qars::qaaccount::marketpreset::MarketPreset::global()
+                    .get(&inst.instrument_id);
+                let preset_margin = preset.buy_frozen_coeff;
+                if preset_margin > 0.0 {
+                    let dev = (inst.margin_rate - preset_margin).abs() / preset_margin;
+                    if dev > 0.25 {
+                        log::warn!(
+                            "⚠️ 保证金率不一致 {}: registry={:.4} vs qars preset buy_frozen_coeff={:.4} \
+                             (偏离 {:.0}%) —— 预检用前者、实际扣费用后者,偏离过大会让资金预检失真",
+                            inst.instrument_id, inst.margin_rate, preset_margin, dev * 100.0
+                        );
+                    }
+                }
+                let preset_comm = preset.commission_coeff_peramount;
+                if preset_comm > 0.0 {
+                    let dev = (inst.commission_rate - preset_comm).abs() / preset_comm;
+                    if dev > 1.0 {
+                        log::warn!(
+                            "⚠️ 手续费率不一致 {}: registry={:.6} vs qars preset commission_coeff_peramount={:.6} \
+                             (偏离 {:.0}%)",
+                            inst.instrument_id, inst.commission_rate, preset_comm, dev * 100.0
+                        );
+                    }
+                }
+            }
+
             log::info!(
                 "  ✓ {} @ {} (margin: {}%, commission: {}%)",
                 inst.instrument_id,
@@ -658,6 +774,9 @@ impl ExchangeServer {
             server_start_time: chrono::Utc::now(),
             // WebSocket 连接计数器 @yutiansut @quantaxis
             ws_connection_count: std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+            // 公告广播用 SnapshotManager;None 时 account_admin 回退到全局静态
+            // (WebSocketServer::new 会设置它) @yutiansut @quantaxis
+            snapshot_mgr: None,
         });
 
         // 创建市场数据服务（解耦：业务逻辑与网络层分离）
@@ -676,6 +795,9 @@ impl ExchangeServer {
             instrument_registry: self.instrument_registry.clone(),
             settlement_engine: self.settlement_engine.clone(),
             account_mgr: self.account_mgr.clone(),
+            // 合约上市要落到撮合引擎和行情服务，否则是幽灵合约 @yutiansut @quantaxis
+            matching_engine: self.matching_engine.clone(),
+            market_data_service: self.market_data_service.clone(),
         };
         let admin_data = web::Data::new(admin_state);
 
@@ -691,8 +813,25 @@ impl ExchangeServer {
         };
         let management_data = web::Data::new(management_state);
 
+        // account_admin 的三个 handler（change_password / get_commission_statistics /
+        // get_margin_summary）直接提取 web::Data<Arc<AccountManager>>，
+        // 未注册时 actix 返回 500 "Requested application data is not configured correctly"
+        // @yutiansut @quantaxis
+        let account_mgr_data = web::Data::new(self.account_mgr.clone());
+
         let bind_address = self.config.http_address.clone();
         let kline_actor_addr = self.kline_actor.clone();
+        // 供管理端鉴权中间件使用 @yutiansut @quantaxis
+        let admin_user_mgr = self.user_mgr.clone();
+        // 只解析、只打印一次 —— App::new 闭包会被每个 worker 执行
+        let require_admin_auth = std::env::var("QAEX_REQUIRE_ADMIN_AUTH")
+            .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+            .unwrap_or(false);
+        if require_admin_auth {
+            log::info!("🔒 Admin auth enabled for /api/admin, /api/management, /api/account-admin");
+        } else {
+            log::warn!("⚠️  Admin auth DISABLED — /api/admin/* accepts unauthenticated requests. Set QAEX_REQUIRE_ADMIN_AUTH=1 to enforce.");
+        }
 
         let server = ActixHttpServer::new(move || {
             App::new()
@@ -701,6 +840,7 @@ impl ExchangeServer {
                 .app_data(web::Data::new(kline_actor_addr.clone())) // KLineActor 地址
                 .app_data(admin_data.clone())
                 .app_data(management_data.clone())
+                .app_data(account_mgr_data.clone()) // account_admin handlers @yutiansut @quantaxis
                 .wrap(middleware::Logger::default())
                 .wrap(middleware::Compress::default())
                 .wrap(
@@ -710,7 +850,25 @@ impl ExchangeServer {
                         .allow_any_header()
                         .max_age(3600),
                 )
-                .configure(qaexchange::service::http::routes::configure)
+                // 提取器错误统一走 JSON 信封 @yutiansut @quantaxis
+                .app_data(web::JsonConfig::default().error_handler(extractor_error))
+                .app_data(web::QueryConfig::default().error_handler(extractor_error))
+                .app_data(web::PathConfig::default().error_handler(extractor_error))
+                .configure({
+                    // ✨ 管理端鉴权 @yutiansut @quantaxis
+                    // 默认**关闭**以保持既有行为(现有压测/运维脚本都不带 token);
+                    // 设 QAEX_REQUIRE_ADMIN_AUTH=1 打开。生产环境应当打开。
+                    //
+                    // ⚠️ 本闭包每个 actix worker 执行一次(生产 96 个),
+                    // 所以状态日志**不能**放这里 —— 已上移到闭包之前只打一次。
+                    let guard = qaexchange::service::http::auth::AdminAuth::new(
+                        admin_user_mgr.clone(),
+                        require_admin_auth,
+                    );
+                    move |cfg: &mut web::ServiceConfig| {
+                        qaexchange::service::http::routes::configure(cfg, guard.clone())
+                    }
+                })
         })
         .bind(&bind_address)?
         .run();
@@ -790,6 +948,50 @@ impl ExchangeServer {
     }
 
     /// 启动定期日志报告
+    /// 启动条件单触发扫描 @yutiansut @quantaxis
+    ///
+    /// `ConditionalOrderEngine::check_triggers`(conditional_order.rs:200)
+    /// 此前**从未在生产被调用** —— 全部引用都在该文件 `#[cfg(test)]`(:322) 之后。
+    /// 实测:建一个触发条件已满足的条件单(现价 3800 >= 触发价 1900),
+    /// 20 秒后 status 仍为 PENDING,且没有产生任何真实订单。
+    ///
+    /// check_triggers 本身是完整的(查过期 → 判触发 → 经 order_router 下单 →
+    /// 置 Triggered 并记 result_order_id),缺的只是「谁来调它」。
+    ///
+    /// 用独立的周期任务而不是挂在成交/行情热路径上:check_triggers 内部会
+    /// 调用 `router.submit_order(...)`,如果从 handle_success_result 里调,
+    /// 等于在处理成交的过程中重入下单路径,有死锁与递归风险。
+    fn start_conditional_order_scanner(self: &Arc<Self>) -> tokio::task::JoinHandle<()> {
+        let matching_engine = self.matching_engine.clone();
+
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(tokio::time::Duration::from_millis(500));
+            log::info!("✅ Conditional order scanner started (500ms)");
+
+            loop {
+                interval.tick().await;
+
+                for instrument_id in matching_engine.get_instruments() {
+                    let last_price = match matching_engine.get_last_price(&instrument_id) {
+                        Some(p) if p > 0.0 => p,
+                        _ => continue,
+                    };
+                    let triggered = qaexchange::exchange::CONDITIONAL_ORDER_ENGINE
+                        .read()
+                        .check_triggers(&instrument_id, last_price);
+                    if !triggered.is_empty() {
+                        log::info!(
+                            "Conditional orders triggered for {}: {} order(s) @ {}",
+                            instrument_id,
+                            triggered.len(),
+                            last_price
+                        );
+                    }
+                }
+            }
+        })
+    }
+
     fn start_periodic_reporting(self: &Arc<Self>) -> tokio::task::JoinHandle<()> {
         let server = self.clone();
 
@@ -900,8 +1102,9 @@ impl ExchangeServer {
     fn recover_from_wal(&self) {
         use qaexchange::storage::recovery::RecoveryManager;
 
-        let wal_dir = format!("{}/wal", self.config.storage_path);
-        let recovery_mgr = RecoveryManager::new(wal_dir);
+        // 传存储根目录，由 RecoveryManager 自己拼 `__ACCOUNT__/wal`
+        // —— 与 OltpHybridStorage::create 的写出路径保持一致 @yutiansut @quantaxis
+        let recovery_mgr = RecoveryManager::new(self.config.storage_path.clone());
 
         match recovery_mgr.recover(&self.account_mgr) {
             Ok(count) if count > 0 => {
@@ -969,6 +1172,22 @@ impl ExchangeServer {
         // 4. 启动 OLAP 转换系统
         self.start_olap_conversion();
 
+        // 4.5 启动盘中风控监控 @yutiansut @quantaxis
+        //
+        // RiskMonitor::start_monitoring 此前**从未在生产被调用** ——
+        // 全部引用都在 risk_monitor.rs 的 #[cfg(test)] 模块内(该模块从 :678 开始,
+        // 引用全在 784 之后)。实测:1 小时压测 92,023 笔订单,
+        // `grep -c RiskMonitor` 全日志 = 0,盘中风控一次都没跑过。
+        //
+        // do_risk_check(:305) 负责:风险等级升级预警 / 可用资金为负告警 /
+        // 临近强平线(95%~100%)告警 / 触发强平。默认 1 秒一轮(:169)。
+        //
+        // ⚠️ 只告警,不会自动强平:强平走 liquidation_callback(:221),
+        // 而 set_liquidation_callback(:241) 同样没有任何生产调用点,
+        // 回调恒为 None。要启用自动强平需另行接回调 —— 那是独立决定。
+        self.risk_monitor.start_monitoring();
+        log::info!("✅ Intra-day risk monitor started (alerts only; auto-liquidation callback not wired)");
+
         // 5. 将 server 包装到 Arc 以便在异步任务中共享
         let server = Arc::new(self);
 
@@ -977,6 +1196,9 @@ impl ExchangeServer {
 
         // 6. 启动快照广播服务
         server.start_snapshot_broadcaster();
+
+        // 6.5 启动条件单触发扫描 @yutiansut @quantaxis
+        let _cond_handle = server.start_conditional_order_scanner();
 
         // 7. 启动定期报告
         let _report_handle = server.start_periodic_reporting();

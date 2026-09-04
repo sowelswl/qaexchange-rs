@@ -22,20 +22,18 @@
         </el-form-item>
         <el-form-item label="日志类型">
           <el-select v-model="searchForm.log_type" placeholder="全部类型" clearable style="width: 150px">
-            <el-option label="登录" value="Login"></el-option>
-            <el-option label="登出" value="Logout"></el-option>
-            <el-option label="下单" value="OrderSubmit"></el-option>
-            <el-option label="撤单" value="OrderCancel"></el-option>
-            <el-option label="入金" value="Deposit"></el-option>
-            <el-option label="出金" value="Withdraw"></el-option>
-            <el-option label="转账" value="Transfer"></el-option>
-            <el-option label="密码修改" value="PasswordChange"></el-option>
-            <el-option label="账户冻结" value="AccountFreeze"></el-option>
-            <el-option label="账户解冻" value="AccountUnfreeze"></el-option>
-            <el-option label="风险警告" value="RiskWarning"></el-option>
-            <el-option label="强制平仓" value="ForceLiquidation"></el-option>
-            <el-option label="设置变更" value="SettingChange"></el-option>
-            <el-option label="管理员操作" value="AdminAction"></el-option>
+            <el-option label="登录" value="LOGIN"></el-option>
+            <el-option label="登出" value="LOGOUT"></el-option>
+            <el-option label="下单" value="ORDER_SUBMIT"></el-option>
+            <el-option label="撤单" value="ORDER_CANCEL"></el-option>
+            <el-option label="入金" value="DEPOSIT"></el-option>
+            <el-option label="出金" value="WITHDRAW"></el-option>
+            <el-option label="转账" value="TRANSFER"></el-option>
+            <el-option label="密码修改" value="PASSWORD_CHANGE"></el-option>
+            <el-option label="账户冻结" value="ACCOUNT_FREEZE"></el-option>
+            <el-option label="账户解冻" value="ACCOUNT_UNFREEZE"></el-option>
+            <el-option label="设置修改" value="SETTINGS_CHANGE"></el-option>
+            <el-option label="风险警报" value="RISK_ALERT"></el-option>
           </el-select>
         </el-form-item>
         <el-form-item label="时间范围">
@@ -64,14 +62,14 @@
         border
         style="width: 100%"
       >
-        <el-table-column prop="id" label="日志ID" width="180" show-overflow-tooltip></el-table-column>
-        <el-table-column prop="timestamp" label="时间" width="180">
+        <el-table-column prop="id" label="日志ID" min-width="180" show-overflow-tooltip></el-table-column>
+        <el-table-column prop="timestamp" label="时间" min-width="180">
           <template slot-scope="scope">
             {{ formatTime(scope.row.timestamp) }}
           </template>
         </el-table-column>
-        <el-table-column prop="account_id" label="账户ID" width="150"></el-table-column>
-        <el-table-column prop="log_type" label="类型" width="120">
+        <el-table-column prop="account_id" label="账户ID" min-width="150" show-overflow-tooltip></el-table-column>
+        <el-table-column prop="log_type" label="类型" min-width="120">
           <template slot-scope="scope">
             <el-tag :type="getLogTypeTag(scope.row.log_type)" size="small">
               {{ getLogTypeLabel(scope.row.log_type) }}
@@ -79,11 +77,11 @@
           </template>
         </el-table-column>
         <el-table-column prop="action" label="操作描述" min-width="200" show-overflow-tooltip></el-table-column>
-        <el-table-column prop="ip_address" label="IP地址" width="140"></el-table-column>
-        <el-table-column prop="result" label="结果" width="100">
+        <el-table-column prop="ip_address" label="IP地址" min-width="140"></el-table-column>
+        <el-table-column prop="result" label="结果" min-width="100">
           <template slot-scope="scope">
-            <el-tag :type="scope.row.result === 'Success' ? 'success' : 'danger'" size="small">
-              {{ scope.row.result === 'Success' ? '成功' : '失败' }}
+            <el-tag :type="scope.row.result === 'SUCCESS' ? 'success' : 'danger'" size="small">
+              {{ scope.row.result === 'SUCCESS' ? '成功' : '失败' }}
             </el-tag>
           </template>
         </el-table-column>
@@ -124,8 +122,8 @@
         <el-descriptions-item label="IP地址">{{ currentLog.ip_address }}</el-descriptions-item>
         <el-descriptions-item label="User Agent">{{ currentLog.user_agent || '-' }}</el-descriptions-item>
         <el-descriptions-item label="结果">
-          <el-tag :type="currentLog.result === 'Success' ? 'success' : 'danger'" size="small">
-            {{ currentLog.result === 'Success' ? '成功' : '失败' }}
+          <el-tag :type="currentLog.result === 'SUCCESS' ? 'success' : 'danger'" size="small">
+            {{ currentLog.result === 'SUCCESS' ? '成功' : '失败' }}
           </el-tag>
         </el-descriptions-item>
         <el-descriptions-item label="详细信息" v-if="currentLog.details">
@@ -161,21 +159,21 @@ export default {
       },
       detailDialogVisible: false,
       currentLog: null,
+      // 键名必须与后端 AuditLogType (SCREAMING_SNAKE_CASE) 完全一致
+      // @yutiansut @quantaxis
       logTypeMap: {
-        Login: '登录',
-        Logout: '登出',
-        OrderSubmit: '下单',
-        OrderCancel: '撤单',
-        Deposit: '入金',
-        Withdraw: '出金',
-        Transfer: '转账',
-        PasswordChange: '密码修改',
-        AccountFreeze: '账户冻结',
-        AccountUnfreeze: '账户解冻',
-        RiskWarning: '风险警告',
-        ForceLiquidation: '强制平仓',
-        SettingChange: '设置变更',
-        AdminAction: '管理员操作'
+        LOGIN: '登录',
+        LOGOUT: '登出',
+        ORDER_SUBMIT: '下单',
+        ORDER_CANCEL: '撤单',
+        DEPOSIT: '入金',
+        WITHDRAW: '出金',
+        TRANSFER: '转账',
+        PASSWORD_CHANGE: '密码修改',
+        ACCOUNT_FREEZE: '账户冻结',
+        ACCOUNT_UNFREEZE: '账户解冻',
+        SETTINGS_CHANGE: '设置修改',
+        RISK_ALERT: '风险警报'
       }
     }
   },
@@ -202,11 +200,10 @@ export default {
           params.start_time = this.searchForm.dateRange[0]
           params.end_time = this.searchForm.dateRange[1]
         }
+        // request 拦截器已解包，后端返回 { total, page, page_size, logs }
         const res = await queryAuditLogs(params)
-        if (res.success) {
-          this.logs = res.data.logs || []
-          this.pagination.total = res.data.total || 0
-        }
+        this.logs = (res && res.logs) || []
+        this.pagination.total = (res && res.total) || 0
       } catch (err) {
         console.error('加载审计日志失败:', err)
         this.$message.error('加载审计日志失败')
@@ -217,11 +214,9 @@ export default {
 
     async viewDetail(log) {
       try {
-        const res = await getAuditLog(log.id)
-        if (res.success) {
-          this.currentLog = res.data
-          this.detailDialogVisible = true
-        }
+        // request 拦截器已解包，直接拿到日志条目
+        this.currentLog = await getAuditLog(log.id)
+        this.detailDialogVisible = true
       } catch (err) {
         console.error('获取日志详情失败:', err)
         this.$message.error('获取日志详情失败')
@@ -264,9 +259,9 @@ export default {
     },
 
     getLogTypeTag(type) {
-      const dangerTypes = ['AccountFreeze', 'ForceLiquidation', 'RiskWarning']
-      const warningTypes = ['Withdraw', 'PasswordChange']
-      const successTypes = ['Login', 'Deposit']
+      const dangerTypes = ['ACCOUNT_FREEZE', 'RISK_ALERT']
+      const warningTypes = ['WITHDRAW', 'PASSWORD_CHANGE']
+      const successTypes = ['LOGIN', 'DEPOSIT']
       if (dangerTypes.includes(type)) return 'danger'
       if (warningTypes.includes(type)) return 'warning'
       if (successTypes.includes(type)) return 'success'

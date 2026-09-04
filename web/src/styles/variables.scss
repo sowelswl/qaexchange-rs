@@ -69,6 +69,37 @@ $sidebar-width: 220px;
 $sidebar-collapsed-width: 64px;
 $header-height: 56px;
 
+// ============= 响应式断点 @yutiansut @quantaxis =============
+// 与 Element UI 栅格断点严格对齐:
+//   xs < 768 | sm >= 768 | md >= 992 | lg >= 1200 | xl >= 1920
+// 全站请复用这几个变量, 不要再各页手写 768/900/1200 三套不一致的值。
+// 注意: variables.scss 未通过 sass.prependData 注入到 SFC 的 <style scoped>,
+//       所以 SFC 内若要用, 需在其 style 块顶部 @import '@/styles/variables.scss';
+$bp-xs-max: 767px;    // 手机 / 窄平板竖屏
+$bp-sm-min: 768px;
+$bp-sm-max: 991px;    // 平板竖屏 (768x1024)
+$bp-md-min: 992px;
+$bp-md-max: 1199px;   // 小笔记本 (1024x768)
+$bp-lg-min: 1200px;
+$bp-lg-max: 1919px;   // 主流笔记本 (1366x768 / 1440x900)
+$bp-xl-min: 1920px;
+
+// ============= 布局垂直/水平预算 @yutiansut @quantaxis =============
+// 这几个值是 layout/index.vue 的真实几何, 之前全站没有一处正确相加,
+// 散落着 -56px / -60px / -100px / -150px / -220px / -250px 六种互相矛盾的口径。
+// 正确预算:
+//   可用高度 = 100vh - $header-height - $content-padding*2            = 100vh - 96px
+//   有公告条时再减 $announcement-height                                = 100vh - 136px
+//   可用宽度 = 100vw - $sidebar-width - $content-padding*2            = 100vw - 260px
+//   侧边栏折叠时 = 100vw - $sidebar-collapsed-width - $content-padding*2 = 100vw - 104px
+$content-padding: 20px;
+$content-padding-mobile: 12px;
+$announcement-height: 40px;
+$layout-chrome-h: $header-height + $content-padding * 2;                        // 96px
+$layout-chrome-h-announced: $layout-chrome-h + $announcement-height;            // 136px
+$layout-chrome-w: $sidebar-width + $content-padding * 2;                        // 260px
+$layout-chrome-w-collapsed: $sidebar-collapsed-width + $content-padding * 2;    // 104px
+
 // ============= 渐变 =============
 $gradient-primary: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
 $gradient-success: linear-gradient(135deg, #11998e 0%, #38ef7d 100%);

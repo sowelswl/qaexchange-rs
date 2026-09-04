@@ -18,7 +18,9 @@ pub struct OrderRequest {
     pub order_id: [u8; 40],
 
     /// 用户ID
-    pub user_id: [u8; 32],
+
+    #[serde(with = "BigArray")]
+    pub user_id: [u8; 40],
 
     /// 合约代码
     pub instrument_id: [u8; 16],
@@ -63,7 +65,7 @@ impl OrderRequest {
     ) -> Self {
         let mut req = Self {
             order_id: [0; 40],
-            user_id: [0; 32],
+            user_id: [0; 40],
             instrument_id: [0; 16],
             direction: direction as u8,
             offset: offset as u8,
@@ -100,7 +102,9 @@ pub struct TradeReport {
     pub exchange_order_id: [u8; 32],
 
     /// 用户ID
-    pub user_id: [u8; 32],
+
+    #[serde(with = "BigArray")]
+    pub user_id: [u8; 40],
 
     /// 合约代码
     pub instrument_id: [u8; 16],
@@ -214,7 +218,9 @@ pub struct OrderAccepted {
     pub exchange_order_id: [u8; 32],
 
     /// 用户ID
-    pub user_id: [u8; 32],
+
+    #[serde(with = "BigArray")]
+    pub user_id: [u8; 40],
 
     /// 合约代码
     pub instrument_id: [u8; 16],
@@ -238,7 +244,9 @@ pub struct OrderStatusNotify {
     pub order_id: [u8; 40],
 
     /// 用户ID
-    pub user_id: [u8; 32],
+
+    #[serde(with = "BigArray")]
+    pub user_id: [u8; 40],
 
     /// 状态：0=已接受, 1=部分成交, 2=全部成交, 3=已撤销, 4=已拒绝
     pub status: u8,
@@ -276,7 +284,10 @@ mod tests {
     #[test]
     fn test_order_request_size() {
         // 验证消息大小合理（用于共享内存分配）
-        assert_eq!(std::mem::size_of::<OrderRequest>(), 128);
+        // user_id 从 [u8;32] 加宽到 [u8;40](36 字符 UUID / ACC_+32hex 都是 36 字符,
+        // 32 字节会静默截断)。布局:40+40+16+4+8+8+8+4+4 = 132 → 对齐 8 = 136。
+        // @yutiansut @quantaxis
+        assert_eq!(std::mem::size_of::<OrderRequest>(), 136);
     }
 
     #[test]

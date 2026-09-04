@@ -219,6 +219,23 @@ pub struct RiskMonitor {
     monitor_running: AtomicBool,
     /// 强平回调（可选，用于触发外部强平流程）
     liquidation_callback: RwLock<Option<LiquidationCallback>>,
+
+    /// 行情源（可选）—— 用于盯市刷价 @yutiansut @quantaxis
+    ///
+    /// ⚠️ 没有它,持仓的 `last_price` **只在自己成交时更新**
+    /// (qars `receive_deal_sim` 用成交价调 `on_price_change`),
+    /// 于是「一个账户的持仓价 = 它最后一笔成交的价格,不成交就永不变」。
+    ///
+    /// 实测(2026-09-04,5 小时压测):同一秒写入的快照里
+    /// IC2501 有 5628.2 / 5338.8 / 5325.2 三个值,滞后最多 289.4 点(5.1%);
+    /// 全系统 Σposition_profit = +2.53 亿(封闭系统里应为 0)。
+    ///
+    /// 后果最重的是**最需要盯市的账户刷价最少** —— 做市商大量挂撤、
+    /// 少量成交,持仓价停在建仓那一刻。极端情形:3800 建多仓后不再成交,
+    /// 价格跌到 3000,账面浮亏仍是 0,风险率不动,**强平永不触发**。
+    ///
+    /// 用可选注入而非改 `new()` 签名:`RiskMonitor::new` 有 30 处测试调用点。
+    price_source: RwLock<Option<Arc<crate::matching::engine::ExchangeMatchingEngine>>>,
 }
 
 impl RiskMonitor {
@@ -234,7 +251,19 @@ impl RiskMonitor {
             last_risk_levels: DashMap::new(),
             monitor_running: AtomicBool::new(false),
             liquidation_callback: RwLock::new(None),
+            price_source: RwLock::new(None),
         }
+    }
+
+    /// 设置行情源(启用盯市刷价)
+    ///
+    /// 不设则退化为原有行为:持仓价只在成交时更新。@yutiansut @quantaxis
+    pub fn set_price_source(
+        &self,
+        engine: Arc<crate::matching::engine::ExchangeMatchingEngine>,
+    ) {
+        *self.price_source.write() = Some(engine);
+        log::info!("✅ RiskMonitor 已接入行情源,启用盯市刷价");
     }
 
     /// 设置强平回调
@@ -315,9 +344,62 @@ impl RiskMonitor {
         for account in accounts.iter() {
             let mut acc = account.write();
             let account_id = acc.account_cookie.clone();
+
+            // ✨ 盯市刷价 —— 必须在算 risk_ratio 之前 @yutiansut @quantaxis
+            //
+            // 用行情最新价刷新该账户所有持仓,否则下面算出的 risk_ratio /
+            // balance / position_profit 全部建立在「该账户最后一次成交价」上。
+            // qars 的 `get_code_subscribed()` 就是为这个场景准备的
+            // (account.rs:604 留着正确用法的注释,是注释掉的),此前生产零调用。
+            //
+            // 本循环已持写锁,刷价零额外锁开销。
+            if let Some(engine) = self.price_source.read().as_ref() {
+                let now = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
+                for code in acc.get_code_subscribed() {
+                    if let Some(px) = engine.get_last_price(&code) {
+                        if px > 0.0 {
+                            acc.on_price_change(code, px, now.clone());
+                        }
+                    }
+                }
+            }
+
             let risk_ratio = acc.get_riskratio();
             let available = acc.money;
             let current_level = RiskLevel::from_risk_ratio(risk_ratio);
+
+            // ✨ 把现算的派生量回写到 QIFI 缓存字段 @yutiansut @quantaxis
+            //
+            // qars 只在 `settle()` 里整体重建 `self.accounts`(account.rs:574),
+            // 成交/撤单都不回写,所以 `acc.accounts.balance / risk_ratio / ...`
+            // **盘中永远是开户初始值**。后果最重的一处是
+            // `risk/pre_trade_check.rs:310` 的 `check_risk_ratio` ——
+            // 它读 `acc.accounts.risk_ratio`(恒为 0.0),
+            // `if 0.0 >= reject_threshold` 永不成立,**这道风控从不生效**。
+            // 实测 NOISE_SELL 真实风险率约 89%,该字段仍是 0.0,
+            // 它一路下单到资金耗尽,风险率闸门全程没拦过。
+            //
+            // 本循环每 `monitor_interval_ms`(默认 1000ms)对每个账户
+            // **已经持有写锁、且已经算出 risk_ratio**,顺手回写零额外开销:
+            //   · `check_risk_ratio` 保持读锁不变即可拿到 ≤1s 新鲜的值,
+            //     不必在每笔订单的热路径上升级成写锁;
+            //   · 其余所有读缓存字段的地方(data_query / monitoring 等)一并受益。
+            // qars 内部无任何条件逻辑依赖这些字段(仅一处测试断言),写回安全;
+            // `settle()` 之后会被整体覆盖,不影响日终口径。
+            let live_balance = acc.get_balance();
+            let live_margin = acc.get_margin();
+            let live_position_profit = acc.get_positionprofit();
+            let live_float_profit = acc.get_floatprofit();
+            let live_close_profit = acc.get_closeprofit();
+            let live_frozen_margin = acc.get_frozen_margin();
+            acc.accounts.risk_ratio = risk_ratio;
+            acc.accounts.balance = live_balance;
+            acc.accounts.available = available;
+            acc.accounts.margin = live_margin;
+            acc.accounts.position_profit = live_position_profit;
+            acc.accounts.float_profit = live_float_profit;
+            acc.accounts.close_profit = live_close_profit;
+            acc.accounts.frozen_margin = live_frozen_margin;
 
             // 检测风险等级变化
             let last_level = self.last_risk_levels

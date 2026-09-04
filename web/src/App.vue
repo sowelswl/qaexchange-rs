@@ -79,10 +79,12 @@ body {
   -moz-osx-font-smoothing: grayscale;
 }
 
+// ✨ #app 只做尺寸约束，不再裁剪内容；真正的滚动容器是 layout 内的
+// .content-wrapper（见 layout/index.vue）。此处保留 height 以便子级
+// height:100% 链条成立，overflow 交给子级处理。 @yutiansut @quantaxis
 #app {
   width: 100%;
   height: 100vh;
-  overflow: hidden;
 }
 
 // 全局滚动条样式

@@ -360,7 +360,7 @@ mod tests {
     fn create_order_record(order_id: u64, timestamp: i64) -> WalRecord {
         WalRecord::OrderInsert {
             order_id,
-            user_id: [1u8; 32],
+            user_id: [1u8; 40],
             instrument_id: [2u8; 16],
             direction: 0,
             offset: 0,

@@ -69,6 +69,38 @@ fn verify_admin_token(token: &str) -> bool {
     token == get_admin_token()
 }
 
+/// 校验账户的交易/资金密码 @yutiansut @quantaxis
+///
+/// 供 transfer.rs 等模块复用 —— 此前 do_transfer 只检查密码**非空**
+/// (transfer.rs:226 `is_empty()`),从不与任何东西比对,密码字段纯装饰。
+/// 实测:`bank_password:"x", future_password:"x"` 转入 50,000 直接成功。
+///
+/// ⚠️ 本函数只是把已有的存储接上,**没有解决存储本身的问题**:
+///   · ACCOUNT_PASSWORDS 是明文 `DashMap<String,(String,String)>`(:20),
+///     用 `!=` 直接比较 —— 而同一代码库的用户登录密码是
+///     `bcrypt::hash(.., DEFAULT_COST)`(user_manager.rs:80)
+///   · 默认密码硬编码为 "123456"(:232,:239,:272),交易与资金密码都是
+///   · 该表**从不持久化**(全库只有 insert/get/entry),重启后所有改动丢失、
+///     一律回到 "123456"
+/// 这三条需要单独的设计决定(哈希算法、默认密码策略、落盘位置),不在此处解决。
+pub(crate) fn verify_account_password(
+    account_id: &str,
+    password_type: PasswordType,
+    password: &str,
+) -> bool {
+    match ACCOUNT_PASSWORDS.get(account_id) {
+        Some(p) => {
+            let expected = match password_type {
+                PasswordType::Trading => &p.0,
+                PasswordType::Fund => &p.1,
+            };
+            expected == password
+        }
+        // 未设置过密码的账户沿用默认值,与 change_password(:232) 的判定保持一致
+        None => password == "123456",
+    }
+}
+
 fn current_timestamp() -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -383,9 +415,15 @@ pub async fn get_margin_summary(
             // @yutiansut @quantaxis: 使用写锁以调用 qars 的 volume_long()/volume_short()
             let mut account_write = account.write();
 
-            let balance = account_write.accounts.balance;
-            let frozen_margin = account_write.accounts.frozen_margin;
-            let risk_ratio = account_write.accounts.risk_ratio;
+            // ⚠️ `acc.accounts.<派生字段>` 盘中**永远是开户时的初始值** ——
+            // qars 只在 `settle()` 里整体重建 self.accounts(account.rs:574),
+            // 成交/撤单都不回写。实测 NOISE_SELL 成交 6.8 万笔后
+            // accounts.balance 仍是 1,500,000,000(init_cash)、risk_ratio 仍是 0.0。
+            // 本处已持写锁(为 get_margin 取的),改用动态 getter 零额外成本。
+            // @yutiansut @quantaxis
+            let balance = account_write.get_balance();
+            let frozen_margin = account_write.get_frozen_margin();
+            let risk_ratio = account_write.get_riskratio();
             let available = account_write.money;
 
             // 收集持仓数据

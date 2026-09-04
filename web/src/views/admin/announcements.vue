@@ -42,30 +42,30 @@
         border
         style="width: 100%"
       >
-        <el-table-column prop="id" label="公告ID" width="180" show-overflow-tooltip></el-table-column>
+        <el-table-column prop="id" label="公告ID" min-width="180" show-overflow-tooltip></el-table-column>
         <el-table-column prop="title" label="标题" min-width="200" show-overflow-tooltip></el-table-column>
-        <el-table-column prop="announcement_type" label="类型" width="120">
+        <el-table-column prop="announcement_type" label="类型" min-width="120">
           <template slot-scope="scope">
             <el-tag :type="getTypeTag(scope.row.announcement_type)" size="small">
               {{ getTypeLabel(scope.row.announcement_type) }}
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="priority" label="优先级" width="100">
+        <el-table-column prop="priority" label="优先级" min-width="100">
           <template slot-scope="scope">
             <el-tag :type="getPriorityTag(scope.row.priority)" size="small">
               {{ getPriorityLabel(scope.row.priority) }}
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="created_at" label="创建时间" width="180">
+        <el-table-column prop="created_at" label="创建时间" min-width="180">
           <template slot-scope="scope">
             {{ formatTime(scope.row.created_at) }}
           </template>
         </el-table-column>
-        <el-table-column prop="effective_until" label="有效期" width="180">
+        <el-table-column prop="expire_time" label="有效期" min-width="180">
           <template slot-scope="scope">
-            {{ scope.row.effective_until ? formatTime(scope.row.effective_until) : '永久' }}
+            {{ scope.row.expire_time ? formatTime(scope.row.expire_time) : '永久' }}
           </template>
         </el-table-column>
         <el-table-column label="状态" width="80">
@@ -162,8 +162,8 @@
         </el-descriptions-item>
         <el-descriptions-item label="创建时间">{{ formatTime(currentAnnouncement.created_at) }}</el-descriptions-item>
         <el-descriptions-item label="创建者">{{ currentAnnouncement.created_by || '-' }}</el-descriptions-item>
-        <el-descriptions-item label="生效时间">{{ currentAnnouncement.effective_from ? formatTime(currentAnnouncement.effective_from) : '立即生效' }}</el-descriptions-item>
-        <el-descriptions-item label="失效时间">{{ currentAnnouncement.effective_until ? formatTime(currentAnnouncement.effective_until) : '永久有效' }}</el-descriptions-item>
+        <el-descriptions-item label="生效时间">{{ currentAnnouncement.publish_time ? formatTime(currentAnnouncement.publish_time) : '立即生效' }}</el-descriptions-item>
+        <el-descriptions-item label="失效时间">{{ currentAnnouncement.expire_time ? formatTime(currentAnnouncement.expire_time) : '永久有效' }}</el-descriptions-item>
         <el-descriptions-item label="内容">
           <div class="announcement-content">{{ currentAnnouncement.content }}</div>
         </el-descriptions-item>
@@ -281,8 +281,8 @@ export default {
             priority: this.createForm.priority
           }
           if (this.createForm.dateRange && this.createForm.dateRange.length === 2) {
-            data.effective_from = this.createForm.dateRange[0]
-            data.effective_until = this.createForm.dateRange[1]
+            data.publish_time = this.createForm.dateRange[0]
+            data.expire_time = this.createForm.dateRange[1]
           }
           // axios拦截器已处理响应 @yutiansut @quantaxis
           await createAnnouncement(data)
@@ -375,8 +375,8 @@ export default {
     },
 
     isActive(row) {
-      if (!row.effective_until) return true
-      return new Date(row.effective_until) > new Date()
+      if (!row.expire_time) return true
+      return new Date(row.expire_time) > new Date()
     }
   }
 }

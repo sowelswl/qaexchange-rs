@@ -68,6 +68,8 @@ pub struct UserTradeView {
     pub volume: f64,
     pub timestamp: i64,
     pub trading_day: String,
+    /// 本笔成交手续费(来自 qars preset.calc_commission)
+    pub commission: f64,
 }
 
 impl UserTradeView {
@@ -98,6 +100,7 @@ impl UserTradeView {
             volume: record.volume,
             timestamp: record.timestamp,
             trading_day: record.trading_day.clone(),
+            commission: record.commission,
         }
     }
 }
@@ -162,7 +165,7 @@ pub async fn query_account(
         Ok(account) => {
             // ✨ 使用 write() 获取可变引用，以便调用 get_margin() 动态计算 @yutiansut @quantaxis
             let mut acc = account.write();
-            let frozen = acc.accounts.balance - acc.money;
+            let frozen = acc.get_balance() - acc.money;   // 同上:不可读缓存字段
 
             // 获取账户元数据
             let (_owner_user_id, account_name, account_type, created_at) = state
@@ -198,12 +201,21 @@ pub async fn query_account(
             let info = AccountInfo {
                 user_id: acc.account_cookie.clone(),
                 user_name: account_name,
-                balance: acc.accounts.balance,
+                // ⚠️ 必须用**动态 getter**,不能读 `acc.accounts.*` 的缓存字段。
+                // QIFI Account 里的 balance / risk_ratio / close_profit 是派生量,
+                // 只有调用对应 getter 时才重算;直接读字段拿到的是初始值 ——
+                // 实测 NOISE_SELL 交易 6.8 万笔后本接口仍返回
+                // balance=1,500,000,000(= init_cash)、risk_ratio=0.0,
+                // 而同一账户在 /api/management/accounts 是 1,683,618,586 / 0.5113。
+                // 本函数上面已经为 margin 特意取了 write 锁做动态计算
+                // (见 :163 注释),balance/risk_ratio/profit 当时漏了。
+                // 口径与 management.rs:110 保持一致。@yutiansut @quantaxis
+                balance: acc.get_balance(),
                 available: acc.money,
                 frozen,
                 margin,
-                profit: acc.accounts.close_profit,
-                risk_ratio: acc.accounts.risk_ratio,
+                profit: acc.get_closeprofit(),
+                risk_ratio: acc.get_riskratio(),
                 account_type: format!("{:?}", account_type).to_lowercase(),
                 created_at,
             };
@@ -441,8 +453,10 @@ pub async fn get_equity_curve(
             (
                 acc.account_cookie.clone(),
                 acc.user_cookie.clone(),
-                acc.accounts.balance,
-                acc.accounts.available,
+                // 同上:本处已持写锁(为 get_margin 取的),读缓存字段拿到的是
+                // 开户初始值。@yutiansut @quantaxis
+                acc.get_balance(),
+                acc.money,
                 total_margin,
             )
         };
@@ -749,6 +763,29 @@ pub async fn deposit(
     use crate::service::http::transfer::TRANSFER_STORE;
     use chrono::Utc;
 
+    // ✨ 金额必须为正 @yutiansut @quantaxis
+    //
+    // 这两个用户端接口**绕过了 CapitalManager**,直接调 acc.deposit()/acc.withdraw(),
+    // 因此也绕过了 capital_mgr.rs:110/:188 已有的 `amount <= 0.0` 校验。
+    //
+    // 实测(隔离实例,干净账户 100 万):
+    //   POST /api/account/withdraw  {"amount": -9000000}
+    //     → 200, available 100 万 → **1000 万**(凭空造出 900 万)
+    //   POST /api/account/deposit   {"amount": -200000000}
+    //     → 200, available → **-1 亿**(负数入金 = 不受余额校验的出金)
+    //   POST /api/management/deposit {"amount": -123456}
+    //     → 400 "存款金额必须大于0"     ← 管理端走 CapitalManager,是对的
+    //
+    // 即出金的 `acc.money < req.amount` 检查对负数完全无效:
+    // 正余额账户 `1000000 < -9000000` 为假,直接放行。
+    if !(req.amount > 0.0) {
+        return Ok(HttpResponse::BadRequest().json(ApiResponse::<()>::error(
+            400,
+            "存款金额必须大于0".to_string(),
+        )));
+    }
+
+
     // 尝试直接获取账户，如果失败且ID不是ACC_开头，则尝试按user_id查找
     let account = if req.account_id.starts_with("ACC_") {
         state.account_mgr.get_account(&req.account_id)
@@ -830,6 +867,29 @@ pub async fn withdraw(
     req: web::Json<WithdrawRequest>,
     state: web::Data<Arc<AppState>>,
 ) -> Result<HttpResponse> {
+    // ✨ 金额必须为正 @yutiansut @quantaxis
+    //
+    // 这两个用户端接口**绕过了 CapitalManager**,直接调 acc.deposit()/acc.withdraw(),
+    // 因此也绕过了 capital_mgr.rs:110/:188 已有的 `amount <= 0.0` 校验。
+    //
+    // 实测(隔离实例,干净账户 100 万):
+    //   POST /api/account/withdraw  {"amount": -9000000}
+    //     → 200, available 100 万 → **1000 万**(凭空造出 900 万)
+    //   POST /api/account/deposit   {"amount": -200000000}
+    //     → 200, available → **-1 亿**(负数入金 = 不受余额校验的出金)
+    //   POST /api/management/deposit {"amount": -123456}
+    //     → 400 "存款金额必须大于0"     ← 管理端走 CapitalManager,是对的
+    //
+    // 即出金的 `acc.money < req.amount` 检查对负数完全无效:
+    // 正余额账户 `1000000 < -9000000` 为假,直接放行。
+    if !(req.amount > 0.0) {
+        return Ok(HttpResponse::BadRequest().json(ApiResponse::<()>::error(
+            400,
+            "取款金额必须大于0".to_string(),
+        )));
+    }
+
+
     use crate::service::http::transfer::TRANSFER_STORE;
     use chrono::Utc;
 
@@ -1095,6 +1155,28 @@ pub async fn batch_submit_orders(
     let account_id = &req.account_id;
     let orders = &req.orders;
 
+    // ✨ 校验账户归属 @yutiansut @quantaxis
+    //
+    // 归属校验在其余 6 个下单/撤单入口都有:handlers.rs:241/:307、
+    // websocket/handler.rs:112/:179、websocket/diff_handler.rs:619/:801。
+    // **只有批量这两个没有** —— 它们的请求体连 user_id 都没有,
+    // 等于没有调用者身份的概念,无从校验。
+    //
+    // 实测(隔离实例,两个不同用户):
+    //   单笔:攻击者用受害者 account_id → 4003 "does not belong to user"  ✓
+    //   批量:同样越权 → **200 success**,受害者账户上真的多了一笔
+    //         O17884446970280000000006 IF2501 BUY 2 手                    ✗
+    if let Err(e) = state
+        .account_mgr
+        .verify_account_ownership(account_id, &req.user_id)
+    {
+        return Ok(HttpResponse::Forbidden().json(ApiResponse::<()>::error(
+            4003,
+            format!("Account verification failed: {}", e),
+        )));
+    }
+
+
     log::info!(
         "📦 批量下单: account_id={}, 订单数={}",
         account_id,
@@ -1172,6 +1254,28 @@ pub async fn batch_cancel_orders(
     let account_id = &req.account_id;
     let order_ids = &req.order_ids;
 
+    // ✨ 校验账户归属 @yutiansut @quantaxis
+    //
+    // 归属校验在其余 6 个下单/撤单入口都有:handlers.rs:241/:307、
+    // websocket/handler.rs:112/:179、websocket/diff_handler.rs:619/:801。
+    // **只有批量这两个没有** —— 它们的请求体连 user_id 都没有,
+    // 等于没有调用者身份的概念,无从校验。
+    //
+    // 实测(隔离实例,两个不同用户):
+    //   单笔:攻击者用受害者 account_id → 4003 "does not belong to user"  ✓
+    //   批量:同样越权 → **200 success**,受害者账户上真的多了一笔
+    //         O17884446970280000000006 IF2501 BUY 2 手                    ✗
+    if let Err(e) = state
+        .account_mgr
+        .verify_account_ownership(account_id, &req.user_id)
+    {
+        return Ok(HttpResponse::Forbidden().json(ApiResponse::<()>::error(
+            4003,
+            format!("Account verification failed: {}", e),
+        )));
+    }
+
+
     log::info!(
         "📦 批量撤单: account_id={}, 订单数={}",
         account_id,
@@ -1245,7 +1349,37 @@ pub async fn modify_order(
     // 1. 获取原订单信息
     let original = match state.order_router.get_order_detail(&order_id) {
         Some((order, status, _, _, filled)) => {
-            if format!("{:?}", status) != "ALIVE" && format!("{:?}", status) != "Alive" {
+            // ✨ 用模式匹配判定可改状态,不要比较 Debug 字符串 @yutiansut @quantaxis
+            //
+            // 原实现是:
+            //   if format!("{:?}", status) != "ALIVE" && format!("{:?}", status) != "Alive"
+            //
+            // 但 `get_order_detail` 返回的是 `order_router::OrderStatus`,它的变体是
+            //   PendingRisk / PendingRoute / Submitted / PartiallyFilled /
+            //   Filled / Cancelled / Rejected            (order_router.rs:156-172)
+            // 另一个 `core::order_ext::OrderStatus` 的变体是
+            //   Pending / Accepted / PartiallyFilled / Filled / Cancelled / Rejected
+            //                                            (core/order_ext.rs:10-23)
+            // **两个枚举都没有 `Alive`**,所以该条件恒为真 ——
+            // 这个接口对任何状态的任何订单都返回 4005,从来不可能成功。
+            //
+            // 实测(隔离实例,一张 status=Submitted 的活单):
+            //   改价 / 改量 / 改不存在的单 / 改负价 / 改 0 手
+            //   → 全部 `4005 订单状态不允许修改: Submitted`
+            // 生产 92,023 笔订单的状态分布里也没有 Alive:
+            //   {Cancelled: 75053, Submitted: 173, Filled: 16749, PartiallyFilled: 48}
+            //
+            // 可改 = 已在簿上且未终结:Submitted / PartiallyFilled。
+            // 排除 PendingRisk / PendingRoute(还没进簿,改了也没意义)
+            // 与 Filled / Cancelled / Rejected(已终结)。
+            //
+            // 顺带:比较 `format!("{:?}", ..)` 的字面量是编译器抓不到的坑 ——
+            // 改个变体名就静默失效。matches! 既正确又能被编译器检查。
+            if !matches!(
+                status,
+                crate::exchange::order_router::OrderStatus::Submitted
+                    | crate::exchange::order_router::OrderStatus::PartiallyFilled
+            ) {
                 return Ok(HttpResponse::BadRequest().json(ApiResponse::<()>::error(
                     4005,
                     format!("订单状态不允许修改: {:?}", status),

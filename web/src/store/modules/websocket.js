@@ -160,10 +160,25 @@ const actions = {
       // 继续初始化，即使获取账户失败
     }
 
+    // ⚠️ DIFF 推送的订阅键是 **account_id** 而不是 user_id。
+    //    实测:同一端点 `ws://.../ws/diff?user_id=<X>`
+    //      X = 用户 UUID   → patch 只有 quotes / notify / ins_list
+    //      X = ACC_xxxxxx  → patch 还有 trades / orders / accounts
+    //    用 UUID 连接会导致成交、委托、账户三类推送全部收不到,
+    //    页面只能靠 HTTP 轮询兜底(纯 WS 的成交/委托区域恒空)。
+    //    fetchUserAccounts 已在上一步执行,此处 currentAccountId 可用。
+    //    @yutiansut @quantaxis
+    const wsKey = state.currentAccountId || userId
+    if (wsKey !== userId) {
+      console.log('[WebSocket] 使用 account_id 作为订阅键:', wsKey)
+    } else {
+      console.warn('[WebSocket] 无 currentAccountId,回退 user_id —— 将收不到成交/委托/账户推送')
+    }
+
     // 创建 WebSocket 管理器
     const ws = new WebSocketManager({
       ...state.config,
-      userId
+      userId: wsKey
     })
 
     // 监听连接成功事件

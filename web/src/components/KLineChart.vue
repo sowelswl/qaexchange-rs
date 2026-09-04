@@ -1,10 +1,22 @@
 <template>
   <div ref="container" class="kline-chart-container">
-    <!-- ✨ 数据加载提示 @yutiansut @quantaxis -->
+    <!-- 数据状态提示 @yutiansut @quantaxis
+         改之前无论什么原因没数据都是同一个转圈动画,用户只能看到「一直在请求」,
+         分不清「还在等」「后端返回空」「请求失败」。三种状态分开说。 -->
     <div v-if="!klineData || klineData.length === 0" class="loading-overlay">
       <div class="loading-content">
-        <i class="el-icon-loading"></i>
-        <span>等待 {{ symbol }} {{ periodLabel }} K线数据...</span>
+        <template v-if="loadError">
+          <i class="el-icon-warning-outline" style="color:#f56c6c"></i>
+          <span>{{ symbol }} {{ periodLabel }} K线加载失败:{{ loadError }}</span>
+        </template>
+        <template v-else-if="loaded">
+          <i class="el-icon-document-delete" style="color:#909399"></i>
+          <span>{{ symbol }} {{ periodLabel }} 暂无K线数据</span>
+        </template>
+        <template v-else>
+          <i class="el-icon-loading"></i>
+          <span>正在加载 {{ symbol }} {{ periodLabel }} K线数据...</span>
+        </template>
       </div>
     </div>
     <div ref="chart" class="kline-chart"></div>
@@ -18,6 +30,31 @@ import HQChart from 'hqchart'
 
 // ✨ HQChart.Chart 包含 jsChartInit 和 JSChart 构造函数 @yutiansut @quantaxis
 const JSChartLib = HQChart.Chart
+
+// ✨ 应用 HQChart 黑色主题 @yutiansut @quantaxis
+//
+// 此前**从未调用 SetStyle**,因此走的是默认白色主题
+// (umychart.style.js:1093 `case WHITE_ID: return new JSChartResource()`),
+// 在深色页面上坐标轴文字、网格线、背景全是浅色 —— 基本看不清。
+//
+// HQChart 自带黑色主题:umychart.style.js:27 `GetBlackStyle()`,
+// 通过 `HQChartStyle.GetStyleConfig(STYLE_TYPE_ID.BLACK_ID)` 取配置
+// (BLACK_ID=1 / WHITE_ID=0,见 :1076-1080),再交给 `JSChart.SetStyle()`
+// (umychart.js:2495)写入全局 g_JSChartResource。
+//
+// 注意这三个符号都挂在 `HQChart.Chart` 命名空间下,不在包的顶层
+// (顶层只导出 Chart / Stock / RegressionTest)。
+// 必须在创建图表实例**之前**设置 —— 它改的是全局资源对象。
+if (JSChartLib && JSChartLib.HQChartStyle && JSChartLib.JSChart) {
+  try {
+    const blackStyle = JSChartLib.HQChartStyle.GetStyleConfig(
+      JSChartLib.STYLE_TYPE_ID ? JSChartLib.STYLE_TYPE_ID.BLACK_ID : 1
+    )
+    if (blackStyle) JSChartLib.JSChart.SetStyle(blackStyle)
+  } catch (e) {
+    console.warn('[KLineChart] 应用黑色主题失败,回退默认白色主题:', e && e.message)
+  }
+}
 
 // ✨ 禁用 HQChart 内部调试日志 @yutiansut @quantaxis
 // HQChart 使用 JSConsole 对象控制日志输出（通过 HQChart.Chart.JSConsole 导出）
@@ -91,6 +128,18 @@ export default {
       default: 0
     },
 
+    // 历史是否已取回(不论有无数据)。false=还在路上
+    loaded: {
+      type: Boolean,
+      default: false
+    },
+
+    // 历史加载失败原因,非空则显示错误态
+    loadError: {
+      type: String,
+      default: ''
+    },
+
     // K线数据（外部传入）
     // 格式: [{ datetime, open, high, low, close, volume, amount }, ...]
     klineData: {
@@ -142,6 +191,7 @@ export default {
       initRetryCount: 0,  // ✨ 初始化重试计数器 @yutiansut @quantaxis
       pendingData: null,  // ✨ 待处理数据（图表未准备好时缓存）@yutiansut @quantaxis
       needsReinit: false, // ✨ 标记是否需要重新初始化（切换周期/合约时）@yutiansut @quantaxis
+      resizeRaf: null,    // ✨ resize 合并帧句柄 @yutiansut @quantaxis
       // ✨ 因子历史数据缓存（用于叠加显示）@yutiansut @quantaxis
       factorHistory: {
         ma5: [],
@@ -231,12 +281,22 @@ export default {
     this.$nextTick(() => {
       setTimeout(() => this.initChart(), 500)
     })
+    // ✨ onSize() 一直存在, 却只有 initChart() 调用过一次 @yutiansut @quantaxis
+    // 它把像素宽高直接写进 .kline-chart 的 style(见 onSize 里的 chart.style.width),
+    // 这会永久盖住 CSS 的 width/height:100%。所以初始化之后视口再变,
+    // 图表就一直停在旧尺寸 —— 要么右侧留白, 要么超出容器被裁。
+    // 这里补上监听; layout/index.vue 折叠侧边栏时也会广播一次 resize。
+    window.addEventListener('resize', this.onWindowResize)
   },
 
   beforeDestroy() {
+    window.removeEventListener('resize', this.onWindowResize)
+    if (this.resizeRaf) {
+      window.cancelAnimationFrame(this.resizeRaf)
+      this.resizeRaf = null
+    }
     if (this.jsChart) {
-      this.jsChart.OnDestroy && this.jsChart.OnDestroy()
-      this.jsChart = null
+      this.destroyChart()
     }
   },
 
@@ -246,20 +306,76 @@ export default {
     convertToHQChartFormat(data) {
       if (!data || data.length === 0) return []
 
+      // ✨ 分钟线的 time 在**下标 8**,不是紧跟 date @yutiansut @quantaxis
+      //
+      // HQChart 有两个 K 线解码器,下标表不同:
+      //   日线   JsonDataToHistoryData(umychart.js:91137)
+      //     [date, yclose, open, high, low, close, vol, amount, position]
+      //                                                          ↑8=持仓量
+      //   分钟线 JsonDataToMinuteHistoryData(umychart.js:91381)
+      //     [date, yclose, open, high, low, close, vol, amount, time, position]
+      //                                                          ↑8=时间
+      // 分钟周期由 RecvMinuteHistoryData(:85379)走后者,
+      // 轴标签用 `kItem.Time`(:15484 `FormatTimeString(kItem.Time,"HH:MM")`)。
+      //
+      // 两次踩错:
+      //   ① 原实现把 date 与 time 乘在一起塞进 [0](YYYYMMDDHHMM),
+      //      而 Date 被按 8 位 YYYYMMDD 解析(:24364 `parseInt(Date/10000)`=年),
+      //      12 位数算出的年月日全错 → 坐标轴时间错误。
+      //   ② 我第一次改成 [date, time, ...] 把 time 插在下标 1,
+      //      于是 open 拿到时间数、后续字段全部错位一格 → NaN:NaN:NaN。
+      //
+      // 正解:date 保持纯 8 位 YYYYMMDD,time 追加到下标 8(hhmm)。
+      const isDaily = Number(this.period) === 0
       return data.map(k => {
-        const date = new Date(k.datetime)
-        let dateNum
-        if (this.period === 0) {
-          // 日线：YYYYMMDD
-          dateNum = date.getFullYear() * 10000 + (date.getMonth() + 1) * 100 + date.getDate()
-        } else {
-          // 分钟线：YYYYMMDDHHMM
-          const datePart = date.getFullYear() * 10000 + (date.getMonth() + 1) * 100 + date.getDate()
-          const timePart = date.getHours() * 100 + date.getMinutes()
-          dateNum = datePart * 10000 + timePart
+        const d = new Date(k.datetime)
+        const dateNum =
+          d.getFullYear() * 10000 + (d.getMonth() + 1) * 100 + d.getDate()
+        const row = [
+          dateNum,
+          k.open,          // YClose —— 缺前收盘,用开盘价近似
+          k.open,
+          k.high,
+          k.low,
+          k.close,
+          k.volume || 0,
+          k.amount || 0
+        ]
+        if (!isDaily) {
+          // 下标 8 = time(hhmm);日线不传,让 GetKLineDataTime 取默认 0
+          row.push(d.getHours() * 100 + d.getMinutes())
         }
-        return [dateNum, k.open, k.open, k.high, k.low, k.close, k.volume || 0, k.amount || 0]
+        return row
       })
+    },
+
+    // 销毁当前图表实例
+    //
+    // ⚠️ 原来写的是 `this.jsChart.OnDestroy && this.jsChart.OnDestroy()` ——
+    // 实例上**根本没有** OnDestroy(实测 OnDestroy:false / Destroy:false /
+    // ChartDestroy:true / ChartDestory:true),`&&` 直接短路,旧图表从不销毁。
+    // 后果:每切一次周期或合约就多留 2 个 canvas,显存 +5.52MB
+    // (实测 2→4→6→8→10 个,5.52→27.6MB),旧 canvas 叠在新的上面 ——
+    // 数据其实更新了(vm.jsChart 指向新实例),但用户看到的还是旧画面。
+    //
+    // HQChart 的真名是 ChartDestroy;ChartDestory 是它自己拼错的兼容别名
+    // (umychart.js:2224 注释「版本写错了,继续使用」)。按存在性依次尝试,
+    // 最后兜底清空容器 DOM,保证 canvas 不残留。
+    // @yutiansut @quantaxis
+    destroyChart() {
+      const c = this.jsChart
+      this.jsChart = null
+      if (c) {
+        for (const name of ['ChartDestroy', 'ChartDestory', 'Destroy', 'OnDestroy']) {
+          if (typeof c[name] === 'function') {
+            try { c[name]() } catch (e) { /* 销毁失败不应阻断后续重建 */ }
+            break
+          }
+        }
+      }
+      // 兜底:HQChart 把 canvas 直接挂在容器下,销毁未必移除 DOM
+      const el = this.$refs.chart
+      if (el) { while (el.firstChild) el.removeChild(el.firstChild) }
     },
 
     // ✨ 初始化图表 @yutiansut @quantaxis
@@ -327,6 +443,23 @@ export default {
         IsShowRightMenu: true,  // 显示右键菜单
         IsShowCorssCursorInfo: true,  // 显示十字光标信息
 
+        // ✨ 关键:告诉 HQChart「周期已由 API 算好,不要再聚合」
+        //
+        // HQChart 的默认假设是喂进来的**永远是 1 分钟原始数据**,它自己按
+        // Period 聚合(umychart.js:85402):
+        //     if (IsMinutePeriod(bindData.Period,false) && !this.IsApiPeriod)
+        //         bindData.Data = bindData.GetPeriodData(bindData.Period);
+        //
+        // 而本项目后端 /api/market/kline/{id}?period=N 返回的已经是 N 周期的
+        // K线。不置本标志的话会被**二次聚合**:实测 5 分钟线拿到 3 根
+        // (02:45/02:50/02:55),图上只画出 1 根 —— Open 取第一根、Close 取最后一根,
+        // 三根被并成一根。日线(Period=0)不受影响,所以之前没暴露。
+        //
+        // 注意 HQChart 判的是 `option.IsApiPeriod==true`(umychart.js:491),
+        // 必须是字面量 true,给 1 / 'true' 都不生效。
+        // @yutiansut @quantaxis
+        IsApiPeriod: true,
+
         Symbol: this.symbol,
 
         KLine: {
@@ -389,8 +522,7 @@ export default {
     // 重新初始化图表
     reinitChart() {
       if (this.jsChart) {
-        this.jsChart.OnDestroy && this.jsChart.OnDestroy()
-        this.jsChart = null
+        this.destroyChart()
         this.isChartReady = false
       }
       this.$nextTick(() => this.initChart())
@@ -399,11 +531,19 @@ export default {
     // 快速重新初始化
     reinitChartFast() {
       if (this.jsChart) {
-        this.jsChart.OnDestroy && this.jsChart.OnDestroy()
-        this.jsChart = null
+        this.destroyChart()
         this.isChartReady = false
       }
       this.$nextTick(() => this.initChart())
+    },
+
+    // ✨ 用 rAF 合并 resize 回调, 拖动窗口时不会每帧都重排 HQChart @yutiansut @quantaxis
+    onWindowResize() {
+      if (this.resizeRaf) return
+      this.resizeRaf = window.requestAnimationFrame(() => {
+        this.resizeRaf = null
+        this.onSize()
+      })
     },
 
     // 调整容器大小

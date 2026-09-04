@@ -15,7 +15,7 @@
 
     <!-- 风险统计卡片 -->
     <el-row :gutter="20" class="stats-row">
-      <el-col :span="6">
+      <el-col :xs="24" :sm="12" :lg="6">
         <div class="stat-card danger">
           <div class="stat-icon">
             <i class="el-icon-warning"></i>
@@ -27,7 +27,7 @@
         </div>
       </el-col>
 
-      <el-col :span="6">
+      <el-col :xs="24" :sm="12" :lg="6">
         <div class="stat-card critical">
           <div class="stat-icon">
             <i class="el-icon-warning-outline"></i>
@@ -39,7 +39,7 @@
         </div>
       </el-col>
 
-      <el-col :span="6">
+      <el-col :xs="24" :sm="12" :lg="6">
         <div class="stat-card warning">
           <div class="stat-icon">
             <i class="el-icon-s-finance"></i>
@@ -51,7 +51,7 @@
         </div>
       </el-col>
 
-      <el-col :span="6">
+      <el-col :xs="24" :sm="12" :lg="6">
         <div class="stat-card info">
           <div class="stat-icon">
             <i class="el-icon-data-line"></i>
@@ -84,6 +84,10 @@
           </div>
         </div>
 
+        <!-- ✨ 表格高度改为跟随视口, 不再写死 500px @yutiansut @quantaxis
+             实测 1366x768: 上方 324px; 原 500px 令表格底部溢出 132px
+             var(--qa-content-h) 由 layout/index.vue 统一定义 = 100vh - 56(顶栏) - 40(padding),
+             有公告条时自动再减 40px; max(260px, ...) 是极短视口下的兜底 -->
         <el-table
           ref="accountTable"
           :data="filteredAccounts"
@@ -91,25 +95,25 @@
           stripe
           v-loading="loading"
           :default-sort="{ prop: 'risk_ratio', order: 'descending' }"
-          height="500"
+          :height="'max(260px, calc(var(--qa-content-h, calc(100vh - 96px)) - 324px))'"
         >
-          <el-table-column prop="user_id" label="账户ID" width="180" sortable></el-table-column>
-          <el-table-column prop="balance" label="总权益" width="130" align="right" sortable>
+          <el-table-column prop="user_id" label="账户ID" min-width="180" sortable show-overflow-tooltip></el-table-column>
+          <el-table-column prop="balance" label="总权益" min-width="150" align="right" sortable>
             <template slot-scope="scope">
               {{ scope.row.balance.toLocaleString('zh-CN', { minimumFractionDigits: 2 }) }}
             </template>
           </el-table-column>
-          <el-table-column prop="margin_used" label="占用保证金" width="130" align="right" sortable>
+          <el-table-column prop="margin_used" label="占用保证金" min-width="130" align="right" sortable>
             <template slot-scope="scope">
               {{ scope.row.margin_used.toLocaleString('zh-CN', { minimumFractionDigits: 2 }) }}
             </template>
           </el-table-column>
-          <el-table-column prop="available" label="可用资金" width="130" align="right" sortable>
+          <el-table-column prop="available" label="可用资金" min-width="150" align="right" sortable>
             <template slot-scope="scope">
               {{ scope.row.available.toLocaleString('zh-CN', { minimumFractionDigits: 2 }) }}
             </template>
           </el-table-column>
-          <el-table-column prop="float_profit" label="浮动盈亏" width="130" align="right" sortable>
+          <el-table-column prop="float_profit" label="浮动盈亏" min-width="90" align="right" sortable>
             <template slot-scope="scope">
               <span :style="{ color: scope.row.float_profit >= 0 ? '#F56C6C' : '#67C23A' }">
                 {{ scope.row.float_profit >= 0 ? '+' : '' }}{{ scope.row.float_profit.toLocaleString('zh-CN', { minimumFractionDigits: 2 }) }}
@@ -117,14 +121,14 @@
             </template>
           </el-table-column>
           <el-table-column prop="position_count" label="持仓数" width="90" align="center" sortable></el-table-column>
-          <el-table-column prop="risk_ratio" label="风险率" width="120" align="right" sortable>
+          <el-table-column prop="risk_ratio" label="风险率" min-width="90" align="right" sortable>
             <template slot-scope="scope">
               <el-tag :type="getRiskTagType(scope.row.risk_ratio)" size="small">
                 {{ (scope.row.risk_ratio * 100).toFixed(1) }}%
               </el-tag>
             </template>
           </el-table-column>
-          <el-table-column prop="position_count" label="持仓品种数" width="120" align="center" sortable></el-table-column>
+          <el-table-column prop="position_count" label="持仓品种数" min-width="95" align="center" sortable></el-table-column>
           <el-table-column label="操作" width="150" fixed="right">
             <template slot-scope="scope">
               <el-button
@@ -162,37 +166,41 @@
           ></el-date-picker>
         </div>
 
+        <!-- ✨ 表格高度改为跟随视口, 不再写死 500px @yutiansut @quantaxis
+             同上(另一 tab 内的表格, 页面 chrome 相同)
+             var(--qa-content-h) 由 layout/index.vue 统一定义 = 100vh - 56(顶栏) - 40(padding),
+             有公告条时自动再减 40px; max(260px, ...) 是极短视口下的兜底 -->
         <el-table
           ref="liquidationTable"
           :data="liquidations"
           border
           stripe
           v-loading="liquidationLoading"
-          height="500"
+          :height="'max(260px, calc(var(--qa-content-h, calc(100vh - 96px)) - 324px))'"
         >
-          <el-table-column prop="liquidation_time" label="强平时间" width="180"></el-table-column>
-          <el-table-column prop="user_id" label="用户ID" width="150"></el-table-column>
-          <el-table-column prop="user_name" label="用户名" width="150"></el-table-column>
-          <el-table-column prop="pre_balance" label="强平前权益" width="130" align="right">
+          <el-table-column prop="liquidation_time" label="强平时间" min-width="180"></el-table-column>
+          <el-table-column prop="user_id" label="用户ID" min-width="150" show-overflow-tooltip></el-table-column>
+          <el-table-column prop="user_name" label="用户名" min-width="150"></el-table-column>
+          <el-table-column prop="pre_balance" label="强平前权益" min-width="130" align="right">
             <template slot-scope="scope">
               {{ scope.row.pre_balance.toLocaleString('zh-CN', { minimumFractionDigits: 2 }) }}
             </template>
           </el-table-column>
-          <el-table-column prop="loss_amount" label="亏损金额" width="130" align="right">
+          <el-table-column prop="loss_amount" label="亏损金额" min-width="130" align="right">
             <template slot-scope="scope">
               <span style="color: #67C23A">
                 -{{ scope.row.loss_amount.toLocaleString('zh-CN', { minimumFractionDigits: 2 }) }}
               </span>
             </template>
           </el-table-column>
-          <el-table-column prop="instrument_id" label="强平合约" width="120"></el-table-column>
-          <el-table-column prop="liquidation_price" label="强平价格" width="120" align="right">
+          <el-table-column prop="instrument_id" label="强平合约" min-width="120" show-overflow-tooltip></el-table-column>
+          <el-table-column prop="liquidation_price" label="强平价格" min-width="120" align="right">
             <template slot-scope="scope">
               {{ scope.row.liquidation_price.toFixed(2) }}
             </template>
           </el-table-column>
-          <el-table-column prop="liquidation_volume" label="强平数量" width="100" align="center"></el-table-column>
-          <el-table-column prop="trigger_type" label="触发类型" width="120">
+          <el-table-column prop="liquidation_volume" label="强平数量" min-width="100" align="center"></el-table-column>
+          <el-table-column prop="trigger_type" label="触发类型" min-width="120">
             <template slot-scope="scope">
               <el-tag :type="scope.row.trigger_type === 'auto' ? 'danger' : 'warning'" size="small">
                 {{ scope.row.trigger_type === 'auto' ? '自动强平' : '手动强平' }}
@@ -237,12 +245,12 @@
               size="mini"
               empty-text="暂无持仓"
             >
-              <el-table-column prop="instrument_id" label="合约" width="140" />
-              <el-table-column prop="volume_long" label="多头" width="100" align="right" />
-              <el-table-column prop="volume_short" label="空头" width="100" align="right" />
-              <el-table-column prop="cost_long" label="多头均价" width="120" align="right" />
-              <el-table-column prop="cost_short" label="空头均价" width="120" align="right" />
-              <el-table-column prop="float_profit" label="浮动盈亏" width="140" align="right">
+              <el-table-column prop="instrument_id" label="合约" min-width="140" show-overflow-tooltip/>
+              <el-table-column prop="volume_long" label="多头" min-width="100" align="right" />
+              <el-table-column prop="volume_short" label="空头" min-width="100" align="right" />
+              <el-table-column prop="cost_long" label="多头均价" min-width="120" align="right" />
+              <el-table-column prop="cost_short" label="空头均价" min-width="120" align="right" />
+              <el-table-column prop="float_profit" label="浮动盈亏" min-width="140" align="right">
                 <template slot-scope="{ row }">
                   <span :style="{ color: (row.float_profit || 0) >= 0 ? '#F56C6C' : '#67C23A' }">
                     {{ formatNumber(row.float_profit || 0) }}
@@ -259,13 +267,13 @@
               size="mini"
               empty-text="暂无订单"
             >
-              <el-table-column prop="order_id" label="订单号" width="160" />
-              <el-table-column prop="instrument_id" label="合约" width="120" />
+              <el-table-column prop="order_id" label="订单号" min-width="160" show-overflow-tooltip/>
+              <el-table-column prop="instrument_id" label="合约" min-width="120" show-overflow-tooltip/>
               <el-table-column prop="direction" label="方向" width="80" align="center" />
               <el-table-column prop="offset" label="开平" width="80" align="center" />
-              <el-table-column prop="price" label="价格" width="100" align="right" />
+              <el-table-column prop="price" label="价格" min-width="100" align="right" />
               <el-table-column prop="volume" label="数量" width="80" align="right" />
-              <el-table-column prop="status" label="状态" width="120" />
+              <el-table-column prop="status" label="状态" min-width="120" />
             </el-table>
           </el-tab-pane>
         </el-tabs>
@@ -360,25 +368,14 @@ export default {
     // 加载统计数据
     async loadStatistics() {
       try {
-        const response = await getMarginSummary()
-        if (response.data && response.data.success) {
-          const data = response.data.data
-          this.statistics = {
-            highRiskCount: data.high_risk_count || 0,
-            criticalRiskCount: data.critical_risk_count || 0,
-            todayLiquidations: data.liquidation_count || 0,
-            averageRiskRatio: data.average_risk_ratio || 0
-          }
-        } else {
-          // 如果API失败，从账户数据中计算
-          this.statistics = {
-            highRiskCount: this.accounts.filter(a => a.risk_ratio >= 0.8).length,
-            criticalRiskCount: this.accounts.filter(a => a.risk_ratio >= 0.9).length,
-            todayLiquidations: 0,
-            averageRiskRatio: this.accounts.length > 0
-              ? this.accounts.reduce((sum, a) => sum + a.risk_ratio, 0) / this.accounts.length
-              : 0
-          }
+        // request 拦截器已解包 { success, data, error }，直接拿到汇总对象；
+        // 请求失败会 reject 到下面的 catch，那里有同样的兜底计算
+        const data = await getMarginSummary()
+        this.statistics = {
+          highRiskCount: data.high_risk_count || 0,
+          criticalRiskCount: data.critical_risk_count || 0,
+          todayLiquidations: data.liquidation_count || 0,
+          averageRiskRatio: data.average_risk_ratio || 0
         }
       } catch (error) {
         console.error('加载统计数据失败', error)
@@ -404,13 +401,9 @@ export default {
           params.end_date = this.dateRange[1]
         }
 
-        const response = await getLiquidationRecords(params)
-        if (response.data && response.data.success) {
-          this.liquidations = response.data.data || []
-        } else {
-          const errorMsg = (response.data && response.data.error && response.data.error.message) || '加载强平记录失败'
-          this.$message.error(errorMsg)
-        }
+        // request 拦截器已解包，直接拿到强平记录数组
+        const records = await getLiquidationRecords(params)
+        this.liquidations = records || []
       } catch (error) {
         this.$message.error('加载强平记录失败')
         console.error(error)

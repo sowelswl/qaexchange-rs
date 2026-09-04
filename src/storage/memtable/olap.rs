@@ -28,7 +28,12 @@ pub fn create_olap_schema() -> Schema {
         Field::new("record_type", DataType::UInt8, false), // 0=OrderInsert, 1=TradeExecuted, 2=AccountUpdate, 3=Checkpoint, 13=KLineFinished
         // Order 字段
         Field::new("order_id", DataType::UInt64, true),
-        Field::new("user_id", DataType::FixedSizeBinary(32), true),
+        // ⚠️ 必须与 `WalRecord` 里 user_id 的字节宽度一致(现为 [u8; 40])。
+        // 写死 32 时 Arrow 会在构建列时 panic:
+        //   InvalidArgumentError("FixedSizeBinaryArray requires every item to be of its length")
+        // 这类不一致**编译期查不出来**(`cargo check --all-targets` 全绿),
+        // 只有跑测试才暴露 —— 本次 12 个测试失败全出自这里。@yutiansut @quantaxis
+        Field::new("user_id", DataType::FixedSizeBinary(40), true),
         Field::new("instrument_id", DataType::FixedSizeBinary(16), true),
         Field::new("direction", DataType::UInt8, true),
         Field::new("offset", DataType::UInt8, true),
@@ -224,7 +229,7 @@ fn build_chunk(records: &[(MemTableKey, WalRecord)]) -> Chunk<Box<dyn Array>> {
 
     // Order 字段
     let mut order_id_builder = MutablePrimitiveArray::<u64>::with_capacity(len);
-    let mut user_id_builder = MutableFixedSizeBinaryArray::with_capacity(32, len);
+    let mut user_id_builder = MutableFixedSizeBinaryArray::with_capacity(40, len);  // 同上,须与 WalRecord 对齐
     let mut instrument_id_builder = MutableFixedSizeBinaryArray::with_capacity(16, len);
     let mut direction_builder = MutablePrimitiveArray::<u8>::with_capacity(len);
     let mut offset_builder = MutablePrimitiveArray::<u8>::with_capacity(len);
@@ -783,7 +788,7 @@ fn reconstruct_record(index: usize, record_type: u8, chunk: &Chunk<Box<dyn Array
                 .as_any()
                 .downcast_ref::<FixedSizeBinaryArray>()
                 .unwrap();
-            let mut user_id = [0u8; 32];
+            let mut user_id = [0u8; 40];
             user_id.copy_from_slice(user_id_array.value(index));
 
             let instrument_id_array = chunk.arrays()[5]
@@ -889,7 +894,7 @@ fn reconstruct_record(index: usize, record_type: u8, chunk: &Chunk<Box<dyn Array
                 .as_any()
                 .downcast_ref::<FixedSizeBinaryArray>()
                 .unwrap();
-            let mut user_id = [0u8; 32];
+            let mut user_id = [0u8; 40];
             user_id.copy_from_slice(user_id_array.value(index));
 
             let balance = chunk.arrays()[12]
@@ -964,7 +969,7 @@ mod tests {
 
                 let record = WalRecord::OrderInsert {
                     order_id: i as u64,
-                    user_id: [1u8; 32],
+                    user_id: [1u8; 40],
                     instrument_id: [2u8; 16],
                     direction: 0,
                     offset: 0,
@@ -1025,7 +1030,7 @@ mod tests {
                 },
                 WalRecord::OrderInsert {
                     order_id: 1,
-                    user_id: [1u8; 32],
+                    user_id: [1u8; 40],
                     instrument_id: [2u8; 16],
                     direction: 0,
                     offset: 0,
@@ -1054,7 +1059,7 @@ mod tests {
                     sequence: 3,
                 },
                 WalRecord::AccountUpdate {
-                    user_id: [1u8; 32],
+                    user_id: [1u8; 40],
                     balance: 10000.0,
                     available: 9000.0,
                     frozen: 1000.0,

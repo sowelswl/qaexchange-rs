@@ -32,7 +32,27 @@ pub struct ManagementAppState {
 /// 账户列表响应
 #[derive(Debug, Clone, Serialize)]
 pub struct AccountListItem {
+    /// 账户ID(= QIFI `account_cookie`)
+    ///
+    /// ⚠️ 历史遗留:下面的 `user_id` 字段装的**也是** account_cookie
+    /// (见 `list_all_accounts` 的赋值),名字是错的。前端
+    /// `admin/accounts.vue` 照字面绑了 `account_id` / `account_name`,
+    /// 后端没有这两个字段 → 两列 20 行永久空白。
+    /// 这里补上名字正确的字段;`user_id`/`user_name` 保留不动,
+    /// 因为 `market-overview.vue:95` 已经按现有语义绑好了,改了会连带坏掉。
+    /// @yutiansut @quantaxis
+    pub account_id: String,
+
+    /// 账户名称(与 `user_name` 同值,名字正确的那个)
+    pub account_name: String,
+
+    /// 该账户的**所属用户** —— `get_account_metadata` 一直返回它,
+    /// 之前被 `let (_owner_user_id, ..)` 丢掉了。
+    pub owner_user_id: String,
+
+    /// @deprecated 实为 account_cookie(账户ID),保留仅为兼容既有前端
     pub user_id: String,
+    /// @deprecated 实为账户名称,保留仅为兼容既有前端
     pub user_name: String,
     pub account_type: String,
     pub balance: f64,
@@ -71,7 +91,7 @@ pub async fn list_all_accounts(
             let mut acc = account.write();
 
             // 获取元数据
-            let (_owner_user_id, account_name, account_type, created_at) = state
+            let (owner_user_id, account_name, account_type, created_at) = state
                 .account_mgr
                 .get_account_metadata(&acc.account_cookie)?;
 
@@ -81,6 +101,9 @@ pub async fn list_all_accounts(
             let total_margin = position_margin + frozen_margin;
 
             Some(AccountListItem {
+                account_id: acc.account_cookie.clone(),
+                account_name: account_name.clone(),
+                owner_user_id,
                 user_id: acc.account_cookie.clone(),
                 user_name: account_name,
                 account_type: format!("{:?}", account_type),
@@ -124,16 +147,42 @@ pub async fn get_account_detail(
 ) -> Result<HttpResponse> {
     match state.account_mgr.get_qifi_slice(&user_id) {
         Ok(qifi) => {
+            // margin 口径对齐 @yutiansut @quantaxis
+            //
+            // qars `get_accountmessage()`(account.rs:328/421)填的是
+            // `margin: self.get_margin()` —— **只有持仓保证金,不含冻结**。
+            // 而 `/api/account/{id}`(handlers.rs)与 `/api/management/accounts`
+            // 都用 `position_margin + frozen_margin`。三个接口同一账户报三个值:
+            //   实测 MM_BETA_BID  前两者 180,470,303.65 / 本接口 79,061,560.45
+            // 差额 101.4M 全是冻结部分。这里补上,与另两个接口一致;
+            // 不去改 qars(共享库,其他项目依赖该口径)。
+            let mut account_info = serde_json::to_value(&qifi.accounts).unwrap();
+            if let Some(obj) = account_info.as_object_mut() {
+                if let Ok(mut acc) = state.account_mgr.get_account(&user_id) {
+                    let mut a = acc.write();
+                    let m = a.get_margin() + a.get_frozen_margin();
+                    obj.insert("margin".into(), serde_json::json!(m));
+                }
+            }
+
             let detail = AccountDetailResponse {
-                account_info: serde_json::to_value(&qifi.accounts).unwrap(),
+                account_info,
+                // ⚠️ `qifi.positions` / `qifi.orders` 是 HashMap,`.iter()` 产出的是
+                // `(&String, &V)` **元组** —— `to_value(元组)` 序列化成二元数组
+                // `["IF2502", {…}]` 而不是对象。前端在数组元素上绑
+                // `prop="instrument_id"` 之类,于是每一格都是空的
+                // (实测 4 行持仓 × 5 列、6054 行订单 × 7 列全空)。
+                // `serde_json::to_value` 接受任何 Serialize,类型系统拦不住这个。
+                // 取 value 即可 —— QIFI 的 instrument_id / order_id 本来就在值里。
+                // @yutiansut @quantaxis
                 positions: qifi
                     .positions
-                    .iter()
+                    .values()
                     .map(|p| serde_json::to_value(p).unwrap())
                     .collect(),
                 orders: qifi
                     .orders
-                    .iter()
+                    .values()
                     .map(|o| serde_json::to_value(o).unwrap())
                     .collect(),
             };

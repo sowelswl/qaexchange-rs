@@ -27,7 +27,7 @@ fn benchmark_wal_append(c: &mut Criterion) {
 
     let record = WalRecord::OrderInsert {
         order_id: [0u8; 40],
-        user_id: [0u8; 32],
+        user_id: [0u8; 40],
         instrument_id: [0u8; 16],
         direction: 0,
         offset: 0,
@@ -200,7 +200,7 @@ fn benchmark_recovery(c: &mut Criterion) {
     for i in 0..100000 {
         let record = WalRecord::OrderInsert {
             order_id: [0u8; 40],
-            user_id: [0u8; 32],
+            user_id: [0u8; 40],
             instrument_id: [0u8; 16],
             direction: 0,
             offset: 0,
@@ -329,7 +329,7 @@ fn benchmark_throughput(c: &mut Criterion) {
             let wal = WalManager::new("/home/quantaxis/qaexchange-rs/output//throughput_wal");
             let record = WalRecord::OrderInsert {
                 order_id: [0u8; 40],
-                user_id: [0u8; 32],
+                user_id: [0u8; 40],
                 instrument_id: [0u8; 16],
                 direction: 0,
                 offset: 0,

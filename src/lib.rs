@@ -122,18 +122,72 @@ pub mod notification;
 pub mod ipc;
 
 // 主从复制系统
+/// ⚠️ **当前未接线** —— 4529 行,生产运行时完全不参与。@yutiansut @quantaxis
+///
+/// **完全孤立** —— main.rs 0 引用,非自身模块 0 引用
+///
+/// 实测(生产运行 1 小时、92k 订单):日志里 `factor` / `dsl` / `replication` /
+/// `Raft` / `leader` / `follower` 全部 **0 次命中**;`nm -C` 在 release 二进制里
+/// 找不到这四块的任何符号 —— Rust 已作为死代码优化掉,**运行时零成本**,
+/// 代价只在编译时间与维护负担。
+///
+/// 保留 `pub mod` 而不删除:这些是有价值的未完成工作(主从复制、因子计算、
+/// 查询引擎),删掉会丢失设计。但**不要以为它们在工作** ——
+/// 接线前先读 sim/patches/APPLY.md 的「已定位但未修」一节。
 pub mod replication;
 
 // 查询引擎系统 (Phase 8)
+/// ⚠️ **当前未接线** —— 2908 行,生产运行时完全不参与。@yutiansut @quantaxis
+///
+/// 1 处外部引用(storage/hybrid/batch_source.rs:18),
+/// 而那条分支**永不进入** —— `olap_cutoff_timestamp` 恒为 0、
+/// `refresh_olap_files` 零调用
+///
+/// 实测(生产运行 1 小时、92k 订单):日志里 `factor` / `dsl` / `replication` /
+/// `Raft` / `leader` / `follower` 全部 **0 次命中**;`nm -C` 在 release 二进制里
+/// 找不到这四块的任何符号 —— Rust 已作为死代码优化掉,**运行时零成本**,
+/// 代价只在编译时间与维护负担。
+///
+/// 保留 `pub mod` 而不删除:这些是有价值的未完成工作(主从复制、因子计算、
+/// 查询引擎),删掉会丢失设计。但**不要以为它们在工作** ——
+/// 接线前先读 sim/patches/APPLY.md 的「已定位但未修」一节。
 pub mod query;
 
 // 因子计算系统 (流批一体化)
+/// ⚠️ **当前未接线** —— 6258 行,生产运行时完全不参与。@yutiansut @quantaxis
+///
+/// 5 处外部引用,但**引用者本身都是死的**:
+///   · dsl —— 自身孤立
+///   · kline_actor —— `enable_factor_compute` 默认 false(:72),
+///     且 set 它的 setter(:92) 生产零调用
+///   · unified_recovery —— 生产零调用(审查已确认)
+///
+/// 实测(生产运行 1 小时、92k 订单):日志里 `factor` / `dsl` / `replication` /
+/// `Raft` / `leader` / `follower` 全部 **0 次命中**;`nm -C` 在 release 二进制里
+/// 找不到这四块的任何符号 —— Rust 已作为死代码优化掉,**运行时零成本**,
+/// 代价只在编译时间与维护负担。
+///
+/// 保留 `pub mod` 而不删除:这些是有价值的未完成工作(主从复制、因子计算、
+/// 查询引擎),删掉会丢失设计。但**不要以为它们在工作** ——
+/// 接线前先读 sim/patches/APPLY.md 的「已定位但未修」一节。
 pub mod factor;
 
 // 集群管理系统 (一致性哈希)
 pub mod cluster;
 
 // DSL 解析系统
+/// ⚠️ **当前未接线** —— 1641 行,生产运行时完全不参与。@yutiansut @quantaxis
+///
+/// **完全孤立** —— 唯一的外部引用是它自己引用 factor
+///
+/// 实测(生产运行 1 小时、92k 订单):日志里 `factor` / `dsl` / `replication` /
+/// `Raft` / `leader` / `follower` 全部 **0 次命中**;`nm -C` 在 release 二进制里
+/// 找不到这四块的任何符号 —— Rust 已作为死代码优化掉,**运行时零成本**,
+/// 代价只在编译时间与维护负担。
+///
+/// 保留 `pub mod` 而不删除:这些是有价值的未完成工作(主从复制、因子计算、
+/// 查询引擎),删掉会丢失设计。但**不要以为它们在工作** ——
+/// 接线前先读 sim/patches/APPLY.md 的「已定位但未修」一节。
 pub mod dsl;
 
 // 性能优化模块 (Phase 5.2)

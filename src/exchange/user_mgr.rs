@@ -1,5 +1,23 @@
 //! 用户管理模块
 //!
+//! ⚠️ **本模块是死代码,不要使用。请用 `crate::user::UserManager`。**
+//! @yutiansut @quantaxis
+//!
+//! 系统里有**两个同名的 `UserManager`**:
+//!
+//! | | 行数 | 生产引用 | 权限模型 |
+//! |---|---|---|---|
+//! | `crate::exchange::user_mgr::UserManager`(本文件) | 291 | **0** | 无 |
+//! | `crate::user::user_manager::UserManager` | 2036 | main.rs + 8 处 | 有(`user_has_permission` / `is_user_admin` / `user_has_role`) |
+//!
+//! `exchange/mod.rs` 的 `pub use user_mgr::{... UserManager}` 让
+//! `crate::exchange::UserManager` 解析到**本文件这个死实现**,
+//! 而真正在跑的是 `crate::user::UserManager` —— 两者同名,极易误用。
+//!
+//! 好消息:本实现也用 bcrypt(`:97`,`:151`),所以误用不会造成密码降级;
+//! 且它**没有权限模型**,所以任何依赖 `user_has_permission` 的代码
+//! 会在编译期失败而不是静默走错分支。
+//!
 //! 负责用户注册、登录、认证等功能
 
 use crate::core::account_ext::{AccountType, OpenAccountRequest};

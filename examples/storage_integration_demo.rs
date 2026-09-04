@@ -61,9 +61,9 @@ impl StorageIntegratedRouter {
         let storage = self.get_or_create_storage(&req.instrument_id);
 
         // 将 account_id 转换为 [u8; 32]
-        let mut user_id_bytes = [0u8; 32];
+        let mut user_id_bytes = [0u8; 40];
         let user_bytes = req.account_id.as_bytes();
-        let copy_len = user_bytes.len().min(32);
+        let copy_len = user_bytes.len().min(40);
         user_id_bytes[..copy_len].copy_from_slice(&user_bytes[..copy_len]);
 
         // 将 instrument_id 转换为 [u8; 16]
@@ -152,9 +152,9 @@ impl StorageIntegratedRouter {
     ) -> Result<u64, String> {
         let storage = self.get_or_create_storage(instrument_id);
 
-        let mut user_id_bytes = [0u8; 32];
+        let mut user_id_bytes = [0u8; 40];
         let user_bytes = user_id.as_bytes();
-        let copy_len = user_bytes.len().min(32);
+        let copy_len = user_bytes.len().min(40);
         user_id_bytes[..copy_len].copy_from_slice(&user_bytes[..copy_len]);
 
         let wal_record = WalRecord::AccountUpdate {

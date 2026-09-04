@@ -26,6 +26,18 @@ pub struct TradeRecord {
     pub volume: f64,
     pub timestamp: i64,
     pub trading_day: String,
+
+    /// 本笔成交的手续费(单边,taker 侧)
+    ///
+    /// ⚠️ 之前**没有这个字段**,于是前端 `views/trades/index.vue:193` 自己算:
+    ///     commission: trade.price * trade.volume * multiplier * 0.0001
+    /// 那是全系统第三个费率 —— qars 真实扣费用
+    /// `preset.calc_commission`(IF 的 commission_coeff_peramount = 2.301e-05),
+    /// `trade_gateway` 的通知 payload 用 0.0003,前端用 0.0001。
+    /// 实测 IF 3798×2 手:真实扣 52.44,前端显示 227.88(**高 4.3 倍且是编的**)。
+    /// 这里存 qars 权威公式算出的值,前端直接显示,不再自己算。
+    /// @yutiansut @quantaxis
+    pub commission: f64,
 }
 
 /// 成交记录器
@@ -67,6 +79,7 @@ impl TradeRecorder {
         price: f64,
         volume: f64,
         trading_day: String,
+        commission: f64,
     ) -> String {
         let trade_id = self.generate_trade_id();
         let timestamp = Utc::now().timestamp_nanos_opt().unwrap_or(0);
@@ -83,6 +96,7 @@ impl TradeRecorder {
             volume,
             timestamp,
             trading_day,
+            commission,
         };
 
         // 存储成交记录
@@ -239,6 +253,7 @@ mod tests {
             100.0,
             10.0,
             "2025-10-03".to_string(),
+            0.0
         );
 
         assert!(!trade_id.is_empty());
@@ -266,6 +281,7 @@ mod tests {
             100.0,
             10.0,
             "2025-10-03".to_string(),
+            0.0
         );
 
         recorder.record_trade(
@@ -278,6 +294,7 @@ mod tests {
             101.0,
             20.0,
             "2025-10-03".to_string(),
+            0.0
         );
 
         let trades = recorder.get_trades_by_instrument("TEST2301");
@@ -298,6 +315,7 @@ mod tests {
             100.0,
             10.0,
             "2025-10-03".to_string(),
+            0.0
         );
 
         recorder.record_trade(
@@ -310,6 +328,7 @@ mod tests {
             110.0,
             20.0,
             "2025-10-03".to_string(),
+            0.0
         );
 
         let stats = recorder.get_trade_stats("TEST2301");

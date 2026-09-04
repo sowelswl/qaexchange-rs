@@ -720,9 +720,9 @@ export function modifyOrder(orderId, data) {
  * @param {number} data.volume - 数量
  * @param {string} data.order_type - 订单类型 LIMIT/MARKET
  * @param {number} data.limit_price - 限价（order_type为LIMIT时必填）
- * @param {string} data.condition_type - 条件类型 StopLoss/TakeProfit/PriceTouch
+ * @param {string} data.condition_type - 条件类型 STOP_LOSS/TAKE_PROFIT/PRICE_TOUCH
  * @param {number} data.trigger_price - 触发价
- * @param {string} data.trigger_condition - 触发条件 GreaterOrEqual/LessOrEqual
+ * @param {string} data.trigger_condition - 触发条件 GE/LE
  * @param {number} data.valid_until - 有效期（时间戳，可选）
  */
 export function createConditionalOrder(data) {
@@ -769,13 +769,26 @@ export function getConditionalOrderStatistics() {
 // ============= K线数据 API @yutiansut @quantaxis =============
 
 /**
- * 获取K线数据
+ * 获取K线历史数据
+ *
+ * ⚠️ 参数名以后端 `src/service/http/kline.rs:KLineQuery` 为准。
+ * 早先这里的文档写的是 `period:'1m'` / `limit`,与后端对不上 ——
+ * 传字符串会被 actix 的 Query 解析器直接打回
+ * `400 Query deserialize error: invalid digit found in string`。
+ * @yutiansut @quantaxis
+ *
  * @param {string} instrumentId - 合约ID
- * @param {Object} params - 查询参数
- * @param {string} params.period - 周期（1m/5m/15m/30m/1h/4h/1d）
- * @param {number} params.limit - 数量（默认100）
- * @param {number} params.start_time - 开始时间戳（可选）
- * @param {number} params.end_time - 结束时间戳（可选）
+ * @param {Object} params
+ * @param {number} params.period - 周期**整数**:0=日线 3=3秒 4=1分 5=5分
+ *                                 6=15分 7=30分 8=60分(见 market/kline.rs
+ *                                 KLinePeriod::from_int)
+ * @param {number} params.count  - 条数(默认 500)
+ * @returns {Promise<{code:number,message:string,data:{symbol:string,period:number,
+ *                    klines:Array<{datetime:number,open:number,high:number,
+ *                    low:number,close:number,volume:number,amount:number}>}}>}
+ *          ⚠️ 本接口返回 `{code,message,data}`,**不是**全站标准的
+ *          `{success,data,error}` 信封,所以 api/request.js 的拦截器
+ *          不会拆包,调用方拿到的是整个对象,要自己取 `.data.klines`。
  */
 export function getKlineData(instrumentId, params = {}) {
   return request({
@@ -793,7 +806,7 @@ export function getKlineData(instrumentId, params = {}) {
  * @param {string} data.account_id - 账户ID
  * @param {string} data.old_password - 旧密码
  * @param {string} data.new_password - 新密码
- * @param {string} data.password_type - 密码类型 Trading/Fund
+ * @param {string} data.password_type - 密码类型 TRADING/FUND
  */
 export function changePassword(data) {
   return request({
@@ -809,7 +822,7 @@ export function changePassword(data) {
  * @param {string} data.admin_token - 管理员令牌
  * @param {string} data.account_id - 账户ID
  * @param {string} data.new_password - 新密码
- * @param {string} data.password_type - 密码类型 Trading/Fund
+ * @param {string} data.password_type - 密码类型 TRADING/FUND
  */
 export function resetPassword(data) {
   return request({
@@ -889,7 +902,7 @@ export function getAccountStatus(accountId) {
  * @param {Object} data - 冻结信息
  * @param {string} data.admin_token - 管理员令牌
  * @param {string} data.account_id - 账户ID
- * @param {string} data.freeze_type - 冻结类型 TradingOnly/WithdrawOnly/Full
+ * @param {string} data.freeze_type - 冻结类型 TRADING_ONLY/WITHDRAW_ONLY/FULL
  * @param {string} data.reason - 冻结原因
  */
 export function freezeAccount(data) {
@@ -983,8 +996,8 @@ export function getAnnouncement(announcementId) {
  * @param {string} data.content - 内容
  * @param {string} data.announcement_type - 公告类型 System/Maintenance/Trading/Risk/Promotion
  * @param {string} data.priority - 优先级 Low/Normal/High/Urgent
- * @param {number} data.effective_from - 生效时间戳（可选）
- * @param {number} data.effective_until - 失效时间戳（可选）
+ * @param {number} data.publish_time - 生效时间戳（可选）
+ * @param {number} data.expire_time - 失效时间戳（可选）
  */
 export function createAnnouncement(data) {
   return request({

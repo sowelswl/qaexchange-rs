@@ -9,7 +9,7 @@
       </div>
 
       <el-row :gutter="20" style="margin-bottom: 20px">
-        <el-col :span="6">
+        <el-col :xs="24" :sm="12" :lg="6">
           <el-card shadow="hover">
             <div class="stat-item">
               <div class="stat-label">总持仓市值</div>
@@ -17,7 +17,7 @@
             </div>
           </el-card>
         </el-col>
-        <el-col :span="6">
+        <el-col :xs="24" :sm="12" :lg="6">
           <el-card shadow="hover">
             <div class="stat-item">
               <div class="stat-label">浮动盈亏</div>
@@ -27,7 +27,7 @@
             </div>
           </el-card>
         </el-col>
-        <el-col :span="6">
+        <el-col :xs="24" :sm="12" :lg="6">
           <el-card shadow="hover">
             <div class="stat-item">
               <div class="stat-label">持仓品种数</div>
@@ -35,7 +35,7 @@
             </div>
           </el-card>
         </el-col>
-        <el-col :span="6">
+        <el-col :xs="24" :sm="12" :lg="6">
           <el-card shadow="hover">
             <div class="stat-item">
               <div class="stat-label">盈亏比</div>
@@ -47,15 +47,19 @@
         </el-col>
       </el-row>
 
+      <!-- ✨ 表格高度改为跟随视口, 不再写死 500px @yutiansut @quantaxis
+           实测 1366x768: 统计卡片占 217px; 原 500px 令表格底部溢出 25px
+           var(--qa-content-h) 由 layout/index.vue 统一定义 = 100vh - 56(顶栏) - 40(padding),
+           有公告条时自动再减 40px; max(260px, ...) 是极短视口下的兜底 -->
       <el-table
         :data="positionList"
         border
         stripe
-        height="500"
+        :height="'max(260px, calc(var(--qa-content-h, calc(100vh - 96px)) - 217px))'"
         :loading="loading"
         show-overflow
       >
-        <el-table-column prop="instrument_id" label="合约代码" width="120" />
+        <el-table-column prop="instrument_id" label="合约代码" min-width="120" show-overflow-tooltip/>
         <el-table-column prop="direction" label="方向" width="80" align="center">
           <template slot-scope="scope">
             <el-tag :type="scope.row.direction === 'LONG' ? 'danger' : 'success'" size="mini">
@@ -63,38 +67,38 @@
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="volume" label="持仓量" width="100" align="right" />
-        <el-table-column prop="available" label="可平量" width="100" align="right" />
-        <el-table-column prop="open_price" label="开仓均价" width="120" align="right">
+        <el-table-column prop="volume" label="持仓量" min-width="100" align="right" />
+        <el-table-column prop="available" label="可平量" min-width="100" align="right" />
+        <el-table-column prop="open_price" label="开仓均价" min-width="120" align="right">
           <template slot-scope="scope">
             {{ scope.row.open_price.toFixed(2) }}
           </template>
         </el-table-column>
-        <el-table-column prop="last_price" label="最新价" width="120" align="right">
+        <el-table-column prop="last_price" label="最新价" min-width="120" align="right">
           <template slot-scope="scope">
             {{ scope.row.last_price.toFixed(2) }}
           </template>
         </el-table-column>
-        <el-table-column prop="position_value" label="持仓市值" width="130" align="right">
+        <el-table-column prop="position_value" label="持仓市值" min-width="130" align="right">
           <template slot-scope="scope">
             ¥{{ formatNumber(scope.row.position_value) }}
           </template>
         </el-table-column>
-        <el-table-column prop="profit" label="浮动盈亏" width="130" align="right">
+        <el-table-column prop="profit" label="浮动盈亏" min-width="130" align="right">
           <template slot-scope="scope">
             <span :class="scope.row.profit >= 0 ? 'profit-text' : 'loss-text'">
               {{ scope.row.profit >= 0 ? '+' : '' }}¥{{ formatNumber(scope.row.profit) }}
             </span>
           </template>
         </el-table-column>
-        <el-table-column prop="profit_ratio" label="盈亏比" width="100" align="right">
+        <el-table-column prop="profit_ratio" label="盈亏比" min-width="100" align="right">
           <template slot-scope="scope">
             <span :class="scope.row.profit_ratio >= 0 ? 'profit-text' : 'loss-text'">
               {{ scope.row.profit_ratio >= 0 ? '+' : '' }}{{ (scope.row.profit_ratio * 100).toFixed(2) }}%
             </span>
           </template>
         </el-table-column>
-        <el-table-column prop="margin" label="占用保证金" width="130" align="right">
+        <el-table-column prop="margin" label="占用保证金" min-width="130" align="right">
           <template slot-scope="scope">
             ¥{{ formatNumber(scope.row.margin) }}
           </template>

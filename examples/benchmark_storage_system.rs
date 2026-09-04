@@ -81,7 +81,7 @@ fn benchmark_wal() {
     for i in 0..TOTAL_OPERATIONS {
         let record = WalRecord::OrderInsert {
             order_id: i.to_le_bytes().try_into().unwrap(),
-            user_id: [0u8; 32],
+            user_id: [0u8; 40],
             instrument_id: [0u8; 16],
             direction: (i % 2) as u8,
             offset: 0,
@@ -116,7 +116,7 @@ fn benchmark_wal() {
             let idx = i * batch_size + j;
             batch.push(WalRecord::OrderInsert {
                 order_id: idx.to_le_bytes().try_into().unwrap(),
-                user_id: [0u8; 32],
+                user_id: [0u8; 40],
                 instrument_id: [0u8; 16],
                 direction: (idx % 2) as u8,
                 offset: 0,
@@ -354,7 +354,7 @@ fn benchmark_recovery() {
     for i in 0..TOTAL_OPERATIONS {
         let record = WalRecord::OrderInsert {
             order_id: i.to_le_bytes().try_into().unwrap(),
-            user_id: [0u8; 32],
+            user_id: [0u8; 40],
             instrument_id: [0u8; 16],
             direction: (i % 2) as u8,
             offset: 0,

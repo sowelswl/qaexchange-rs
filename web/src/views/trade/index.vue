@@ -1,78 +1,56 @@
 <template>
   <div class="trade-page">
-    <el-row :gutter="20">
-      <!-- 左侧：订单簿和最新成交 -->
-      <el-col :span="8">
-        <!-- 合约选择 + WebSocket 状态 @yutiansut @quantaxis -->
-        <el-card class="instrument-selector" shadow="hover">
-          <div class="selector-header">
-            <el-select
-              v-model="selectedInstrument"
-              @change="handleInstrumentChange"
-              placeholder="选择合约"
-              style="flex: 1"
-              size="medium"
-            >
-              <el-option
-                v-for="inst in instruments"
-                :key="inst.instrument_id"
-                :label="`${inst.instrument_id} - ${inst.name}`"
-                :value="inst.instrument_id"
-              />
-            </el-select>
-            <!-- WebSocket 连接状态指示器 -->
-            <el-tooltip :content="wsEnabled ? '点击切换到 HTTP 轮询' : '点击切换到 WebSocket'" placement="top">
-              <el-tag
-                :type="wsConnectionStatus.type"
-                size="small"
-                class="ws-status-tag"
-                @click="toggleWebSocket"
-                style="cursor: pointer; margin-left: 8px;"
-              >
-                <i :class="wsEnabled ? 'el-icon-connection' : 'el-icon-refresh'"></i>
-                {{ wsConnectionStatus.text }}
-              </el-tag>
-            </el-tooltip>
-          </div>
-        </el-card>
+    <!-- ① 顶部条:合约选择 + 实时行情 + 连接状态 @yutiansut @quantaxis
+         原来是两张独立 el-card(instrument-selector / market-info),
+         各自带边框和 padding,把「选什么」和「现在多少钱」割成两块。
+         合并成一条横向 header,跨整宽,一眼看完。 -->
+    <div class="trade-topbar">
+      <el-select
+        v-model="selectedInstrument"
+        @change="handleInstrumentChange"
+        placeholder="选择合约"
+        class="tb-inst"
+        size="small"
+      >
+        <el-option
+          v-for="inst in instruments"
+          :key="inst.instrument_id"
+          :label="`${inst.instrument_id} - ${inst.name}`"
+          :value="inst.instrument_id"
+        />
+      </el-select>
 
-        <!-- 实时行情 -->
-        <el-card class="market-info" shadow="hover">
-          <div class="price-display">
-            <div class="last-price" :class="priceChangeClass">
-              {{ tickData.last_price ? tickData.last_price.toFixed(2) : '--' }}
-            </div>
-            <div class="price-change">
-              <span v-if="priceChange !== 0">
-                {{ priceChange > 0 ? '+' : '' }}{{ priceChange.toFixed(2) }}
-                ({{ priceChangePercent > 0 ? '+' : '' }}{{ priceChangePercent.toFixed(2) }}%)
-              </span>
-            </div>
-          </div>
-          <el-row :gutter="10" class="tick-info">
-            <el-col :span="8">
-              <div class="info-item">
-                <span class="label">买一</span>
-                <span class="value bid">{{ bestBidPrice ? bestBidPrice.toFixed(2) : '--' }}</span>
-              </div>
-            </el-col>
-            <el-col :span="8">
-              <div class="info-item">
-                <span class="label">卖一</span>
-                <span class="value ask">{{ bestAskPrice ? bestAskPrice.toFixed(2) : '--' }}</span>
-              </div>
-            </el-col>
-            <el-col :span="8">
-              <div class="info-item">
-                <span class="label">成交量</span>
-                <span class="value">{{ tickData.volume || 0 }}</span>
-              </div>
-            </el-col>
-          </el-row>
-        </el-card>
+      <div class="tb-price" :class="priceChangeClass">
+        <span class="tb-last">{{ tickData.last_price ? tickData.last_price.toFixed(2) : '--' }}</span>
+        <span class="tb-chg" v-if="priceChange !== 0">
+          {{ priceChange > 0 ? '+' : '' }}{{ priceChange.toFixed(2) }}
+          ({{ priceChangePercent > 0 ? '+' : '' }}{{ priceChangePercent.toFixed(2) }}%)
+        </span>
+      </div>
 
+      <div class="tb-quotes">
+        <div class="tb-q"><span>买一</span><b class="bid">{{ bestBidPrice ? bestBidPrice.toFixed(2) : '--' }}</b></div>
+        <div class="tb-q"><span>卖一</span><b class="ask">{{ bestAskPrice ? bestAskPrice.toFixed(2) : '--' }}</b></div>
+        <div class="tb-q"><span>成交量</span><b>{{ tickData.volume || 0 }}</b></div>
+      </div>
+
+      <el-tooltip :content="wsEnabled ? '点击切换到 HTTP 轮询' : '点击切换到 WebSocket'" placement="top">
+        <el-tag
+          :type="wsConnectionStatus.type"
+          size="small"
+          class="tb-ws"
+          @click="toggleWebSocket"
+        >
+          <i :class="wsEnabled ? 'el-icon-connection' : 'el-icon-refresh'"></i>
+          {{ wsConnectionStatus.text }}
+        </el-tag>
+      </el-tooltip>
+    </div>
+
+    <el-row :gutter="16">
+      <el-col :xs="24" :lg="8">
         <!-- 订单簿 -->
-        <el-card class="orderbook" shadow="hover">
+        <el-card class="orderbook" shadow="never">
           <div slot="header" class="card-header">
             <span>订单簿</span>
             <el-button-group size="mini">
@@ -134,7 +112,7 @@
         </el-card>
 
         <!-- 最新成交 -->
-        <el-card class="recent-trades" shadow="hover">
+        <el-card class="recent-trades" shadow="never">
           <div slot="header">最新成交</div>
           <div class="trades-list">
             <div class="header-row">
@@ -157,46 +135,52 @@
       </el-col>
 
       <!-- 右侧：下单面板 -->
-      <el-col :span="16">
-        <el-card class="order-panel" shadow="hover">
-          <el-tabs v-model="activeTab">
-            <!-- 买入/卖出 -->
-            <el-tab-pane label="买入开仓" name="buy">
-              <order-form
-                :instrument-id="selectedInstrument"
-                :current-price="tickData.last_price"
-                direction="BUY"
-                offset="OPEN"
-                @submit="handleOrderSubmit"
-                @account-change="handleAccountChange"
-              />
-            </el-tab-pane>
+      <el-col :xs="24" :lg="16">
+        <!-- ② 下单区:方向用按钮组切换,不用 tabs @yutiansut @quantaxis
+             原来三个 el-tab-pane 各挂一份 order-form,切 tab 会整块重绘,
+             且「买/卖/平」被拆成三个页面 —— 交易时最需要的恰是快速反手。
+             改为顶部一排方向按钮,下方复用同一个表单实例。 -->
+        <el-card class="order-panel" shadow="never">
+          <div class="op-switch">
+            <button
+              type="button"
+              :class="['op-btn', 'op-buy', activeTab === 'buy' ? 'is-on' : '']"
+              @click="activeTab = 'buy'"
+            >买入开仓</button>
+            <button
+              type="button"
+              :class="['op-btn', 'op-sell', activeTab === 'sell' ? 'is-on' : '']"
+              @click="activeTab = 'sell'"
+            >卖出开仓</button>
+            <button
+              type="button"
+              :class="['op-btn', 'op-close', activeTab === 'close' ? 'is-on' : '']"
+              @click="activeTab = 'close'"
+            >平仓</button>
+          </div>
 
-            <el-tab-pane label="卖出开仓" name="sell">
-              <order-form
-                :instrument-id="selectedInstrument"
-                :current-price="tickData.last_price"
-                direction="SELL"
-                offset="OPEN"
-                @submit="handleOrderSubmit"
-                @account-change="handleAccountChange"
-              />
-            </el-tab-pane>
-
-            <el-tab-pane label="平仓" name="close">
-              <close-form
-                ref="closeForm"
-                :instrument-id="selectedInstrument"
-                :current-price="tickData.last_price"
-                @submit="handleOrderSubmit"
-                @account-change="handleAccountChange"
-              />
-            </el-tab-pane>
-          </el-tabs>
+          <order-form
+            v-if="activeTab !== 'close'"
+            :key="activeTab"
+            :instrument-id="selectedInstrument"
+            :current-price="tickData.last_price"
+            :direction="activeTab === 'buy' ? 'BUY' : 'SELL'"
+            offset="OPEN"
+            @submit="handleOrderSubmit"
+            @account-change="handleAccountChange"
+          />
+          <close-form
+            v-else
+            ref="closeForm"
+            :instrument-id="selectedInstrument"
+            :current-price="tickData.last_price"
+            @submit="handleOrderSubmit"
+            @account-change="handleAccountChange"
+          />
         </el-card>
 
         <!-- 当前委托 -->
-        <el-card class="pending-orders" shadow="hover">
+        <el-card class="pending-orders" shadow="never">
           <div slot="header" class="card-header">
             <span>当前委托</span>
             <el-button size="mini" @click="loadPendingOrders">刷新</el-button>
@@ -208,8 +192,8 @@
             height="300"
             size="mini"
           >
-            <el-table-column prop="order_id" label="订单号" width="150" />
-            <el-table-column prop="instrument_id" label="合约" width="100" />
+            <el-table-column prop="order_id" label="订单号" min-width="150" show-overflow-tooltip/>
+            <el-table-column prop="instrument_id" label="合约" min-width="100" show-overflow-tooltip/>
             <el-table-column prop="direction" label="方向" width="60" align="center">
               <template slot-scope="scope">
                 <span :class="scope.row.direction === 'BUY' ? 'buy-text' : 'sell-text'">
@@ -1166,41 +1150,37 @@ $primary-color: #1890ff;
       background: $dark-bg-card !important;
     }
 
-    ::v-deep .el-tabs {
-      .el-tabs__header {
-        background: $dark-bg-card !important;
-        border-bottom: 1px solid $dark-border;
-        margin: 0;
-      }
+    /* 方向切换按钮组 —— 取代原 el-tabs @yutiansut @quantaxis */
+    .op-switch {
+      display: flex;
+      gap: 0;
+      margin: -4px 0 16px;
+      border: 1px solid $dark-border;
+      border-radius: 4px;
+      overflow: hidden;
 
-      .el-tabs__nav-wrap::after {
-        background: $dark-border;
-      }
-
-      .el-tabs__nav {
-        background: $dark-bg-card !important;
-      }
-
-      .el-tabs__item {
+      .op-btn {
+        flex: 1;
+        padding: 9px 0;
+        font-size: 14px;
+        font-weight: 600;
+        letter-spacing: 1px;
         color: $dark-text-secondary;
-        font-weight: 500;
-        background: transparent !important;
+        background: transparent;
+        border: none;
+        border-right: 1px solid $dark-border;
+        cursor: pointer;
+        transition: all .15s;
 
-        &:hover { color: $dark-text-primary; }
+        &:last-child { border-right: none; }
+        &:hover { color: $dark-text-primary; background: rgba(255,255,255,.04); }
 
-        &.is-active {
-          color: $primary-color;
-          font-weight: 600;
+        &.is-on {
+          color: #fff;
+          &.op-buy   { background: #f56c6c; }
+          &.op-sell  { background: #67c23a; }
+          &.op-close { background: #909399; }
         }
-      }
-
-      .el-tabs__active-bar {
-        background: $primary-color;
-      }
-
-      .el-tabs__content {
-        padding: 16px 0;
-        background: $dark-bg-card !important;
       }
     }
 
@@ -1482,6 +1462,71 @@ $primary-color: #1890ff;
     .market-info .price-display .last-price {
       font-size: 32px;
     }
+  }
+}
+
+/* ① 顶部条:合约 + 行情 + 连接状态 @yutiansut @quantaxis */
+.trade-topbar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+  padding: 10px 14px;
+  margin-bottom: 16px;
+  /* ⚠️ 原来写的是 var(--qa-card-bg, #fff) —— 该 CSS 变量在本项目中
+     **从未定义**,于是回退到 #fff,顶部条变成整条纯白(实测 1140×58
+     rgb(255,255,255))。改用 SCSS 变量。@yutiansut @quantaxis */
+  background: $dark-bg-card;
+  border: 1px solid $dark-border;
+  border-radius: 4px;
+
+  .tb-inst { flex: 0 0 220px; max-width: 100%; }
+
+  .tb-price {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    &.price-up   .tb-last, &.price-up   .tb-chg { color: #f56c6c; }
+    &.price-down .tb-last, &.price-down .tb-chg { color: #67c23a; }
+    .tb-last {
+      color: $dark-text-primary;
+      font-size: 26px;
+      font-weight: 700;
+      line-height: 1;
+      font-variant-numeric: tabular-nums;
+    }
+    .tb-chg { font-size: 13px; font-variant-numeric: tabular-nums; }
+  }
+
+  .tb-quotes {
+    display: flex;
+    gap: 18px;
+    margin-left: auto;
+    .tb-q {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
+      span { font-size: 11px; color: #909399; line-height: 1.4; }
+      b {
+        font-size: 14px;
+        font-weight: 600;
+        font-variant-numeric: tabular-nums;
+        &.bid { color: #67c23a; }
+        &.ask { color: #f56c6c; }
+      }
+    }
+  }
+
+  .tb-ws { cursor: pointer; flex: 0 0 auto; }
+}
+
+/* 窄屏:行情与盘口报价换行,合约选择占整宽 */
+@media (max-width: 768px) {
+  .trade-topbar {
+    gap: 10px;
+    .tb-inst { flex: 1 1 100%; }
+    .tb-quotes { margin-left: 0; width: 100%; justify-content: space-between; }
+    .tb-price .tb-last { font-size: 22px; }
   }
 }
 </style>

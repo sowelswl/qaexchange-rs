@@ -8,6 +8,12 @@ const WS_HOST = process.env.VUE_APP_WS_HOST || process.env.VUE_APP_API_HOST || '
 const WS_PORT = process.env.VUE_APP_WS_PORT || '8095'
 
 module.exports = {
+  // ✨ 开发态默认关掉 source map：eval-source-map 会把 chunk-vendors 撑到 17MB+。
+  // 需要调试时设 VUE_APP_DEVTOOL=eval-cheap-module-source-map 再启动。
+  // @yutiansut @quantaxis
+  configureWebpack: {
+    devtool: process.env.VUE_APP_DEVTOOL || false
+  },
   publicPath: '/',
   outputDir: 'dist',
   assetsDir: 'static',
@@ -17,6 +23,12 @@ module.exports = {
     port: 8096,
     host: '0.0.0.0',  // 允许外部访问
     open: true,
+    // ✨ 通过 NAT / 反向代理访问时 Host 头是任意的，webpack-dev-server 3.x 会回
+    // "Invalid Host header"。v3 没有 v4 的 allowedHosts:'all'，必须用这个开关。
+    // @yutiansut @quantaxis
+    disableHostCheck: true,
+    // ✨ gzip 压缩：chunk-vendors.js 未压缩 17.32MB，公网传输直接卡死
+    compress: true,
     // @yutiansut @quantaxis 允许通过域名访问
     allowedHosts: [
       'localhost',

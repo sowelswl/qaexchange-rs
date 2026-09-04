@@ -91,15 +91,15 @@
       <el-form :model="freezeForm" :rules="freezeRules" ref="freezeForm" label-width="100px">
         <el-form-item label="冻结类型" prop="freeze_type">
           <el-select v-model="freezeForm.freeze_type" placeholder="请选择冻结类型" style="width: 100%">
-            <el-option label="仅限交易" value="TradingOnly">
+            <el-option label="仅限交易" value="TRADING_ONLY">
               <span>仅限交易</span>
               <span style="color: #909399; font-size: 12px;"> - 禁止下单和撤单，允许出金</span>
             </el-option>
-            <el-option label="仅限出金" value="WithdrawOnly">
+            <el-option label="仅限出金" value="WITHDRAW_ONLY">
               <span>仅限出金</span>
               <span style="color: #909399; font-size: 12px;"> - 禁止出金，允许交易</span>
             </el-option>
-            <el-option label="全部冻结" value="Full">
+            <el-option label="全部冻结" value="FULL">
               <span>全部冻结</span>
               <span style="color: #909399; font-size: 12px;"> - 禁止所有操作</span>
             </el-option>
@@ -160,7 +160,7 @@ export default {
       freezeDialogVisible: false,
       unfreezeDialogVisible: false,
       freezeForm: {
-        freeze_type: 'Full',
+        freeze_type: 'FULL',
         reason: ''
       },
       unfreezeForm: {
@@ -180,9 +180,9 @@ export default {
         Closed: '已关闭'
       },
       freezeTypeMap: {
-        TradingOnly: '仅限交易',
-        WithdrawOnly: '仅限出金',
-        Full: '全部冻结'
+        TRADING_ONLY: '仅限交易',
+        WITHDRAW_ONLY: '仅限出金',
+        FULL: '全部冻结'
       }
     }
   },
@@ -230,7 +230,7 @@ export default {
 
     showFreezeDialog() {
       this.freezeForm = {
-        freeze_type: 'Full',
+        freeze_type: 'FULL',
         reason: ''
       }
       this.freezeDialogVisible = true

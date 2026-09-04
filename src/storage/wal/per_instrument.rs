@@ -211,7 +211,7 @@ mod tests {
                 "IF2501",
                 WalRecord::OrderInsert {
                     order_id: 1,
-                    user_id: [1u8; 32],
+                    user_id: [1u8; 40],
                     instrument_id: [1u8; 16],
                     direction: 0,
                     offset: 0,
@@ -227,7 +227,7 @@ mod tests {
                 "IC2501",
                 WalRecord::OrderInsert {
                     order_id: 1, // 不同品种可以有相同的 order_id
-                    user_id: [2u8; 32],
+                    user_id: [2u8; 40],
                     instrument_id: [2u8; 16],
                     direction: 0,
                     offset: 0,
@@ -283,7 +283,7 @@ mod tests {
                 "IF2501",
                 WalRecord::OrderInsert {
                     order_id: i,
-                    user_id: [0u8; 32],
+                    user_id: [0u8; 40],
                     instrument_id: [0u8; 16],
                     direction: 0,
                     offset: 0,
@@ -300,7 +300,7 @@ mod tests {
                 "IC2501",
                 WalRecord::OrderInsert {
                     order_id: i,
-                    user_id: [0u8; 32],
+                    user_id: [0u8; 40],
                     instrument_id: [0u8; 16],
                     direction: 0,
                     offset: 0,
@@ -362,7 +362,7 @@ mod tests {
                                 &inst_id,
                                 WalRecord::OrderInsert {
                                     order_id: i,
-                                    user_id: [inst_idx as u8; 32],
+                                    user_id: [inst_idx as u8; 40],
                                     instrument_id: [0u8; 16],
                                     direction: 0,
                                     offset: 0,

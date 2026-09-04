@@ -227,9 +227,9 @@ impl StorageSubscriber {
                 let acc_id_len = acc_id_bytes.len().min(64);
                 account_id_bytes[..acc_id_len].copy_from_slice(&acc_id_bytes[..acc_id_len]);
 
-                let mut user_id_bytes = [0u8; 32];
+                let mut user_id_bytes = [0u8; 40];
                 let user_bytes = account_open.user_id.as_bytes();
-                let copy_len = user_bytes.len().min(32);
+                let copy_len = user_bytes.len().min(40);
                 user_id_bytes[..copy_len].copy_from_slice(&user_bytes[..copy_len]);
 
                 let mut account_name_bytes = [0u8; 64];
@@ -252,9 +252,9 @@ impl StorageSubscriber {
 
             // 账户更新通知 -> WAL AccountUpdate
             NotificationPayload::AccountUpdate(account) => {
-                let mut user_id_bytes = [0u8; 32];
+                let mut user_id_bytes = [0u8; 40];
                 let user_bytes = account.user_id.as_bytes();
-                let copy_len = user_bytes.len().min(32);
+                let copy_len = user_bytes.len().min(40);
                 user_id_bytes[..copy_len].copy_from_slice(&user_bytes[..copy_len]);
 
                 let record = WalRecord::AccountUpdate {
@@ -285,12 +285,12 @@ impl StorageSubscriber {
 
             // 订单接受通知 -> WAL OrderInsert
             NotificationPayload::OrderAccepted(order) => {
-                let mut user_id_bytes = [0u8; 32];
+                let mut user_id_bytes = [0u8; 40];
                 let mut instrument_id_bytes = [0u8; 16];
 
                 // 从 exchange_order_id 提取 user_id (简化实现)
                 let user_bytes = order.exchange_order_id.as_bytes();
-                let copy_len = user_bytes.len().min(32);
+                let copy_len = user_bytes.len().min(40);
                 user_id_bytes[..copy_len].copy_from_slice(&user_bytes[..copy_len]);
 
                 let inst_bytes = order.instrument_id.as_bytes();

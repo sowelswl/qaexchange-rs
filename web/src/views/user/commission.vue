@@ -13,8 +13,13 @@
       <div slot="header">
         <span>手续费统计</span>
       </div>
+      <!-- ⚠️ el-form-item 必须有 el-form 祖先:ElFormItem 会 inject('elForm'),
+           拿不到就在 render 里读 undefined.$options 抛错,整块卡片渲染失败
+           (`Injection "elForm" not found` / `Cannot read properties of undefined`)。
+           @yutiansut @quantaxis -->
+      <el-form :inline="true" @submit.native.prevent>
       <el-row :gutter="20">
-        <el-col :span="6">
+        <el-col :xs="24" :sm="12" :md="8" :lg="6">
           <el-form-item label="选择账户">
             <el-select v-model="selectedAccountId" placeholder="请选择账户" style="width: 200px" @change="loadStatistics">
               <el-option
@@ -27,48 +32,52 @@
           </el-form-item>
         </el-col>
       </el-row>
+      </el-form>
       <el-row :gutter="20" v-if="statistics">
-        <el-col :span="6">
+        <el-col :xs="24" :sm="12" :lg="8">
           <div class="stat-item">
             <div class="stat-label">累计手续费</div>
             <div class="stat-value danger">{{ statistics.total_commission.toFixed(2) }}</div>
           </div>
         </el-col>
-        <el-col :span="6">
+        <el-col :xs="24" :sm="12" :lg="8">
           <div class="stat-item">
             <div class="stat-label">今日手续费</div>
             <div class="stat-value warning">{{ statistics.today_commission.toFixed(2) }}</div>
           </div>
         </el-col>
-        <el-col :span="6">
-          <div class="stat-item">
-            <div class="stat-label">本月手续费</div>
-            <div class="stat-value primary">{{ statistics.this_month_commission.toFixed(2) }}</div>
-          </div>
-        </el-col>
-        <el-col :span="6">
-          <div class="stat-item">
-            <div class="stat-label">交易笔数</div>
-            <div class="stat-value success">{{ statistics.trade_count }}</div>
-          </div>
-        </el-col>
+        <!-- ⚠️ 原来这里还有「本月手续费」和「交易笔数」两张卡,但后端
+             CommissionStatistics(models.rs:418-423) 只有
+             account_id / total_commission / today_commission / commission_by_instrument
+             四个字段。`statistics.this_month_commission.toFixed(2)` 读 undefined
+             直接把整个 el-card 渲染打断。此前该错误被 loadAccounts 的 400 掩盖
+             (账户列表为空 → 从不调 loadStatistics)。@yutiansut @quantaxis -->
       </el-row>
 
       <!-- 按品种明细 -->
       <el-table
-        v-if="statistics && statistics.by_instrument && statistics.by_instrument.length > 0"
-        :data="statistics.by_instrument"
+        v-if="statistics && statistics.commission_by_instrument && statistics.commission_by_instrument.length > 0"
+        :data="statistics.commission_by_instrument"
         stripe
         border
         style="width: 100%; margin-top: 20px;"
       >
-        <el-table-column prop="instrument_id" label="合约" width="150"></el-table-column>
-        <el-table-column prop="trade_count" label="交易笔数" width="100"></el-table-column>
-        <el-table-column prop="total_volume" label="成交量" width="100"></el-table-column>
-        <el-table-column prop="commission" label="手续费">
-          <template slot-scope="scope">
-            {{ scope.row.commission.toFixed(2) }}
-          </template>
+        <!-- 列对齐后端 InstrumentCommission(models.rs:427-432):
+             instrument_id / open_commission / close_commission /
+             close_today_commission / total。原来的 trade_count / total_volume /
+             commission 三列后端一个都没有。@yutiansut @quantaxis -->
+        <el-table-column prop="instrument_id" label="合约" min-width="120" show-overflow-tooltip></el-table-column>
+        <el-table-column label="开仓手续费" min-width="110" align="right">
+          <template slot-scope="scope">{{ (scope.row.open_commission || 0).toFixed(2) }}</template>
+        </el-table-column>
+        <el-table-column label="平仓手续费" min-width="110" align="right">
+          <template slot-scope="scope">{{ (scope.row.close_commission || 0).toFixed(2) }}</template>
+        </el-table-column>
+        <el-table-column label="平今手续费" min-width="110" align="right">
+          <template slot-scope="scope">{{ (scope.row.close_today_commission || 0).toFixed(2) }}</template>
+        </el-table-column>
+        <el-table-column label="合计" min-width="110" align="right">
+          <template slot-scope="scope">{{ (scope.row.total || 0).toFixed(2) }}</template>
         </el-table-column>
       </el-table>
     </el-card>
@@ -93,39 +102,39 @@
         style="width: 100%"
         max-height="500"
       >
-        <el-table-column prop="product_id" label="品种" width="100"></el-table-column>
-        <el-table-column prop="exchange_id" label="交易所" width="100"></el-table-column>
+        <el-table-column prop="product_id" label="品种" min-width="100" show-overflow-tooltip></el-table-column>
+        <el-table-column prop="exchange_id" label="交易所" min-width="100" show-overflow-tooltip></el-table-column>
         <el-table-column label="开仓手续费" align="center">
-          <el-table-column prop="open_ratio_by_money" label="按金额" width="120">
+          <el-table-column prop="open_ratio_by_money" label="按金额" min-width="75">
             <template slot-scope="scope">
               {{ scope.row.open_ratio_by_money > 0 ? (scope.row.open_ratio_by_money * 100).toFixed(4) + '%' : '-' }}
             </template>
           </el-table-column>
-          <el-table-column prop="open_ratio_by_volume" label="按手数" width="120">
+          <el-table-column prop="open_ratio_by_volume" label="按手数" min-width="70">
             <template slot-scope="scope">
               {{ scope.row.open_ratio_by_volume > 0 ? scope.row.open_ratio_by_volume.toFixed(2) + '元/手' : '-' }}
             </template>
           </el-table-column>
         </el-table-column>
         <el-table-column label="平仓手续费" align="center">
-          <el-table-column prop="close_ratio_by_money" label="按金额" width="120">
+          <el-table-column prop="close_ratio_by_money" label="按金额" min-width="120">
             <template slot-scope="scope">
               {{ scope.row.close_ratio_by_money > 0 ? (scope.row.close_ratio_by_money * 100).toFixed(4) + '%' : '-' }}
             </template>
           </el-table-column>
-          <el-table-column prop="close_ratio_by_volume" label="按手数" width="120">
+          <el-table-column prop="close_ratio_by_volume" label="按手数" min-width="120">
             <template slot-scope="scope">
               {{ scope.row.close_ratio_by_volume > 0 ? scope.row.close_ratio_by_volume.toFixed(2) + '元/手' : '-' }}
             </template>
           </el-table-column>
         </el-table-column>
         <el-table-column label="平今手续费" align="center">
-          <el-table-column prop="close_today_ratio_by_money" label="按金额" width="120">
+          <el-table-column prop="close_today_ratio_by_money" label="按金额" min-width="120">
             <template slot-scope="scope">
               {{ scope.row.close_today_ratio_by_money > 0 ? (scope.row.close_today_ratio_by_money * 100).toFixed(4) + '%' : '-' }}
             </template>
           </el-table-column>
-          <el-table-column prop="close_today_ratio_by_volume" label="按手数" width="120">
+          <el-table-column prop="close_today_ratio_by_volume" label="按手数" min-width="120">
             <template slot-scope="scope">
               {{ scope.row.close_today_ratio_by_volume > 0 ? scope.row.close_today_ratio_by_volume.toFixed(2) + '元/手' : '-' }}
             </template>
@@ -140,6 +149,7 @@
 /**
  * 手续费查询页面 @yutiansut @quantaxis
  */
+import { mapGetters } from 'vuex'
 import { getCommissionRates, getCommissionStatistics, getUserAccounts } from '@/api'
 
 export default {
@@ -157,6 +167,10 @@ export default {
   },
 
   computed: {
+    // 登录用户 ID 来自 vuex（store 持久化到 localStorage 'currentUser'）
+    // @yutiansut @quantaxis
+    ...mapGetters(['currentUser']),
+
     filteredRates() {
       if (!this.searchKeyword) return this.rates
       const keyword = this.searchKeyword.toLowerCase()
@@ -181,15 +195,14 @@ export default {
 
     async loadAccounts() {
       try {
-        const userId = localStorage.getItem('userId')
+        const userId = this.currentUser
         if (!userId) return
+        // request 拦截器已解包，后端返回 { accounts, total } @yutiansut @quantaxis
         const res = await getUserAccounts(userId)
-        if (res.success) {
-          this.accounts = res.data || []
-          if (this.accounts.length > 0 && !this.selectedAccountId) {
-            this.selectedAccountId = this.accounts[0].account_id
-            this.loadStatistics()
-          }
+        this.accounts = (res && res.accounts) || []
+        if (this.accounts.length > 0 && !this.selectedAccountId) {
+          this.selectedAccountId = this.accounts[0].account_id
+          this.loadStatistics()
         }
       } catch (err) {
         console.error('加载账户列表失败:', err)
@@ -199,10 +212,9 @@ export default {
     async loadRates() {
       this.loading = true
       try {
-        const res = await getCommissionRates()
-        if (res.success) {
-          this.rates = res.data || []
-        }
+        // request 拦截器已解包，直接拿到手续费率数组
+        const rates = await getCommissionRates()
+        this.rates = rates || []
       } catch (err) {
         console.error('加载手续费率失败:', err)
         this.$message.error('加载手续费率失败')
@@ -214,10 +226,8 @@ export default {
     async loadStatistics() {
       if (!this.selectedAccountId) return
       try {
-        const res = await getCommissionStatistics(this.selectedAccountId)
-        if (res.success) {
-          this.statistics = res.data
-        }
+        // request 拦截器已解包，直接拿到统计对象
+        this.statistics = await getCommissionStatistics(this.selectedAccountId)
       } catch (err) {
         console.error('加载手续费统计失败:', err)
       }
@@ -251,16 +261,24 @@ export default {
   margin-bottom: 20px;
 }
 
+/* ⚠️ 原来写死 background:#f5f7fa —— 在深色页面上是一块亮灰底。
+   本文件既没引入 styles/variables.scss、也没自带 $dark-* 定义,
+   所以只能硬编码,这正是「两套样式」的来源。
+   实测 margin 页 5 块、commission 页 2 块 rgb(245,247,250)。
+   @yutiansut @quantaxis */
 .stat-item {
   text-align: center;
   padding: 20px;
-  background: #f5f7fa;
+  /* 值取自 styles/variables.scss:21,23 —— 本文件是 lang=css,
+     不能 @import SCSS 变量,故直接写值并注明来源 */
+  background: #21262d;
+  border: 1px solid #30363d;
   border-radius: 8px;
 }
 
 .stat-label {
   font-size: 14px;
-  color: #909399;
+  color: #8b949e;
   margin-bottom: 10px;
 }
 

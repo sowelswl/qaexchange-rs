@@ -71,54 +71,58 @@
 
     <!-- 流水列表 -->
     <div class="table-container">
+      <!-- ✨ 表格高度改为跟随视口, 不再写死 450px @yutiansut @quantaxis
+           实测 1366x768: 上方 318px + 底部分页 52px; 原 450px 令表格底部溢出 76px
+           var(--qa-content-h) 由 layout/index.vue 统一定义 = 100vh - 56(顶栏) - 40(padding),
+           有公告条时自动再减 40px; max(260px, ...) 是极短视口下的兜底 -->
       <el-table
         ref="transactionTable"
         :data="transactions"
         border
         stripe
         v-loading="loading"
-        height="450"
+        :height="'max(260px, calc(var(--qa-content-h, calc(100vh - 96px)) - 370px))'"
       >
-        <el-table-column prop="transaction_id" label="交易ID" width="180" sortable></el-table-column>
-        <el-table-column prop="user_id" label="用户ID" width="150" sortable></el-table-column>
-        <el-table-column prop="transaction_type" label="交易类型" width="120" sortable>
+        <el-table-column prop="transaction_id" label="交易ID" min-width="180" sortable show-overflow-tooltip></el-table-column>
+        <el-table-column prop="user_id" label="用户ID" min-width="150" sortable show-overflow-tooltip></el-table-column>
+        <el-table-column prop="transaction_type" label="交易类型" min-width="120" sortable>
           <template slot-scope="scope">
             <el-tag :type="getTypeTagType(scope.row.transaction_type)" size="small">
               {{ getTypeName(scope.row.transaction_type) }}
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="amount" label="金额" width="140" align="right" sortable>
+        <el-table-column prop="amount" label="金额" min-width="140" align="right" sortable>
           <template slot-scope="scope">
             <span :class="getAmountClass(scope.row.transaction_type)">
               {{ formatAmount(scope.row.transaction_type, scope.row.amount) }}
             </span>
           </template>
         </el-table-column>
-        <el-table-column prop="balance_before" label="交易前余额" width="140" align="right">
+        <el-table-column prop="balance_before" label="交易前余额" min-width="140" align="right">
           <template slot-scope="scope">
             {{ scope.row.balance_before.toLocaleString('zh-CN', { minimumFractionDigits: 2 }) }}
           </template>
         </el-table-column>
-        <el-table-column prop="balance_after" label="交易后余额" width="140" align="right">
+        <el-table-column prop="balance_after" label="交易后余额" min-width="140" align="right">
           <template slot-scope="scope">
             {{ scope.row.balance_after.toLocaleString('zh-CN', { minimumFractionDigits: 2 }) }}
           </template>
         </el-table-column>
-        <el-table-column prop="status" label="状态" width="100" sortable>
+        <el-table-column prop="status" label="状态" min-width="100" sortable>
           <template slot-scope="scope">
             <el-tag :type="getStatusTagType(scope.row.status)" size="small">
               {{ getStatusName(scope.row.status) }}
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="method" label="方式" width="120">
+        <el-table-column prop="method" label="方式" min-width="120">
           <template slot-scope="scope">
             {{ getMethodName(scope.row.method) }}
           </template>
         </el-table-column>
-        <el-table-column prop="remark" label="备注" width="200"></el-table-column>
-        <el-table-column prop="created_at" label="交易时间" width="180" sortable>
+        <el-table-column prop="remark" label="备注" min-width="200"></el-table-column>
+        <el-table-column prop="created_at" label="交易时间" min-width="180" sortable>
           <template slot-scope="scope">
             {{ scope.row.created_at }}
           </template>
